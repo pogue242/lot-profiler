@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lot Profiler</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><b>Lot Profiler</b><span>Tax lots, zoning and land use for New York City</span></div>
+  <div class="search">
+    <input id="q" type="search" placeholder="Address, BBL, block, or station" autocomplete="off" spellcheck="false" aria-label="Search by address, BBL, borough-block-lot, or subway station">
+    <ul id="qres" role="listbox"></ul>
+  </div>
+  <nav id="history" aria-label="PLUTO releases">
+    <span class="hlabel">PLUTO release</span>
+    <ol id="track"></ol>
+    <label class="compare">Compare with
+      <select id="cmp"><option value="">nothing</option></select>
+    </label>
+  </nav>
+</header>
+
+<main id="wrap">
+  <section id="mapbox">
+    <div id="map"></div>
+    <div id="tools" role="toolbar" aria-label="Selection tools">
+      <button data-mode="lot" title="Select a lot; shift-click to add more (L)">Lot</button>
+      <button data-mode="block" title="Select a tax block; shift-click to add more (B)">Block</button>
+      <button data-mode="area" class="on" title="Select a Neighborhood Tabulation Area (N)">NTAs</button>
+      <button data-mode="tract" title="Select a 2020 census tract (T)">Tracts</button>
+      <button data-mode="poly" title="Draw a boundary (D)">Draw</button>
+      <button data-mode="radius" title="Radius around a point, entrance or station (R)">Radius</button>
+      <button id="addBtn" class="addb" aria-pressed="false" title="Keep earlier selections so you can compare several (+). Shift-click does the same once.">＋ Add</button>
+    </div>
+    <button id="satBtn" title="Switch between map and satellite">Satellite</button>
+    <div id="hint" hidden></div>
+    <details id="legend" open>
+      <summary>Map layers</summary>
+      <label class="cb">Color lots by
+        <select id="colorBy">
+          <option value="lu">Land use</option>
+          <option value="ub">Units per building</option>
+          <option value="zn">Zoning district</option>
+          <option value="fc">FAR capacity category</option>
+          <option value="bf">Built FAR</option>
+          <option value="mf">Maximum usable FAR</option>
+          <option value="fd">Unused FAR</option>
+          <option value="yb">Year built</option>
+        </select>
+      </label>
+      <div id="swatches"></div>
+      <div id="rangeBox" hidden>
+        <div class="rrow"><label>From <input id="rMin" type="number" step="0.1"></label><label>to <input id="rMax" type="number" step="0.1"></label><button id="rAuto" class="mini">Reset</button></div>
+        <label class="rrow" id="rampRow">Colors <select id="ramp">
+          <option value="blues">Blues</option><option value="greens">Greens</option><option value="viridis">Viridis</option><option value="magma">Magma</option>
+        </select></label>
+      </div>
+      <details id="mapOpts">
+        <summary>Customize map</summary>
+        <label class="rrow">Basemap <select id="basemap"><option value="map">Map</option><option value="sat">Satellite</option><option value="none">None</option></select></label>
+        <label class="slider">Lot fill <input id="opacity" type="range" min="0.1" max="1" step="0.05" value="0.85"><output id="opOut">85%</output></label>
+        <div class="checks">
+          <label><input type="checkbox" data-opt="lotLines" checked> Lot lines</label>
+          <label><input type="checkbox" data-opt="labels" checked> Street names</label>
+          <label><input type="checkbox" data-opt="ntas" checked> Neighborhoods</label>
+          <label><input type="checkbox" data-opt="tracts"> Tract lines</label>
+          <label><input type="checkbox" data-opt="dim" checked> Fade outside selection</label>
+        </div>
+        <span class="ol">Subway</span>
+        <div class="checks">
+          <label><input type="checkbox" data-sub="lines" checked> Lines</label>
+          <label><input type="checkbox" data-sub="stations" checked> Stations</label>
+          <label><input type="checkbox" data-sub="names" checked> Station names</label>
+          <label><input type="checkbox" data-sub="entrances" checked> Entrances</label>
+          <label><input type="checkbox" data-sub="platforms" checked> Platforms</label>
+        </div>
+        <label class="rrow">Walkshed rings <select id="rings">
+          <option value="0">Off</option><option value="402.3">¼ mile</option><option value="804.7">½ mile</option><option value="1609.3">1 mile</option>
+        </select></label>
+        <p id="subStatus">Subway data: loading…</p>
+      </details>
+    </details>
+    <div id="maptip" hidden></div>
+    <div id="loading">Loading lots…</div>
+  </section>
+  <div id="dragbar" title="Drag to resize"></div>
+  <aside id="panel">
+    <div id="head">
+      <button id="btnX" class="hx" hidden title="Clear the selection (Ctrl+Z to undo)" aria-label="Clear the selection">×</button>
+      <p id="back" hidden><button class="link" id="btnBack"></button></p>
+      <h1 id="areaName">Pick an area to profile</h1>
+      <p id="areaSub"></p>
+      <div id="selbar" hidden></div>
+      <div id="actions" hidden>
+        <button id="btnLink">Copy link</button>
+        <button id="btnCsv">Download CSV</button>
+        <button id="btnClear">Clear</button>
+      </div>
+    </div>
+    <details id="opts" hidden>
+      <summary>Customize <span id="optSum"></span></summary>
+      <div class="orow">
+        <div><span class="ol">Charts</span>
+          <div class="seg" id="styleSeg"><button data-v="bars" class="on">Bars</button><button data-v="pies">Pies</button></div></div>
+        <div><span class="ol">Size</span>
+          <div class="seg" id="sizeSeg"><button data-v="s" class="on">S</button><button data-v="m">M</button><button data-v="l">L</button></div></div>
+      </div>
+      <span class="ol">Building-size groups</span>
+      <select id="ubPreset">
+        <option value="all">Every size separately</option>
+        <option value="1, 2, 3-4, 5+">1 · 2 · 3–4 · 5+</option>
+        <option value="1-2, 3-9, 10+">1–2 · 3–9 · 10+</option>
+        <option value="1, 2-4, 5-19, 20+">1 · 2–4 · 5–19 · 20+</option>
+        <option value="1-4, 5-49, 50+">1–4 · 5–49 · 50+</option>
+        <option value="custom">Custom…</option>
+      </select>
+      <input id="ubCustom" type="text" placeholder="e.g. 1, 2, 3-4, 5+" spellcheck="false" hidden>
+      <div id="ubErr" hidden></div>
+      <div id="ubPills"></div>
+      <span class="ol">Land uses counted</span>
+      <div id="luFilter"></div>
+    </details>
+    <div id="profile"></div>
+  </aside>
+</main>
+<div id="tip" hidden></div>
+<div id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
