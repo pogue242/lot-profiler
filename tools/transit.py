@@ -22,7 +22,9 @@ import argparse, csv, gzip, io, json, os, re, struct, sys, time, urllib.parse, u
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 STATIONS = "https://data.ny.gov/api/views/39hk-dx4f/rows.csv?accessType=DOWNLOAD"
 ENTRANCES = "https://data.ny.gov/api/views/i9wp-a4ja/rows.csv?accessType=DOWNLOAD"
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS = ["https://overpass-api.de/api/interpreter",          # public Overpass servers, tried in order
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter"]
 NYC = [-74.26, 40.49, -73.70, 40.92]
 UA = {"User-Agent": "LotProfiler/2 (transit.py)"}
 
@@ -30,6 +32,19 @@ def get(url, data=None):
     req = urllib.request.Request(url, data=data, headers=UA)
     with urllib.request.urlopen(req, timeout=180) as r:
         return r.read()
+
+def overpass(q):
+    body = urllib.parse.urlencode({"data": q}).encode()
+    for attempt in range(2):
+        for url in OVERPASS:
+            try:
+                print(f"  asking {url.split('/')[2]} …")
+                out = json.loads(get(url, body))
+                if out.get("elements"): return out
+            except Exception as err:
+                print(f"  {url.split('/')[2]} failed ({err.__class__.__name__}); trying the next server")
+        time.sleep(20)
+    sys.exit("Every Overpass server failed or was busy. Wait a few minutes and run this again.")
 
 def norm(row):
     return {re.sub(r"[^a-z0-9]", "", k.lower()): v for k, v in row.items()}
@@ -77,7 +92,9 @@ def main():
     q = (f"[out:json][timeout:120];relation[\"route\"=\"subway\"]({s},{w},{n},{e});out geom;"
          f"(way[\"railway\"=\"platform\"]({s},{w},{n},{e});"
          f"relation[\"railway\"=\"platform\"]({s},{w},{n},{e}););out geom;")
-    osm = json.load(open(a.osm)) if a.osm else json.loads(get(OVERPASS, urllib.parse.urlencode({"data": q}).encode()))
+    osm = json.load(open(a.osm)) if a.osm else overpass(q)
+    if not any(x.get("tags", {}).get("route") == "subway" for x in osm.get("elements", [])):
+        sys.exit("OpenStreetMap returned no subway lines. The Overpass servers may be busy; try again in a few minutes.")
 
     out = {"built": time.strftime("%Y-%m-%d"), "bbox": [w, s, e, n],
            "stations": keep_st, "entrances": keep_en, "osm": osm,
