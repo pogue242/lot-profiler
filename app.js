@@ -1,7 +1,7 @@
-/* Lot Profiler 1.4 — all client logic.
+/* Lot Profiler 1.4.1 — all client logic.
    Each PLUTO release is one gzipped binary pack (tools/build.py) decoded straight into typed arrays.
    Subway data comes from data/transit.json (tools/transit.py) or, failing that, live from
-   MTA Open Data and OpenStreetMap. Nothing here needs an API key. */
+   MTA Open Data and OpenStreetMap.*/
 "use strict";
 
 /* ═══ palette & vocab (order matches tools/build.py) ═══════════════════ */
@@ -653,89 +653,169 @@ function buildTransit(raw){
     const t=String(pick(r,"entrancetype","type")||"").toLowerCase();
     entrances.push({sid,lng,lat,type:pick(r,"entrancetype","type")||"Entrance",kind:/elev/.test(t)?"elevator":/escal/.test(t)?"escalator":/ramp/.test(t)?"ramp":/stair/.test(t)?"stair":"other",
       entry:!/^no/i.test(String(pick(r,"entryallowed")??"yes")), exit:!/^no/i.test(String(pick(r,"exitallowed")??"yes"))}); }
-  const trunks=new Map(), plats=[];
+  const ways=new Map(), plats=[];
   for (const el of (raw.osm&&raw.osm.elements)||[]){ const t=el.tags||{};
-    if (el.type==="relation" && t.route==="subway"){ const ref=(t.ref||"").trim(), color=MTA[ref]||t.colour||"#808183";
-      if (!trunks.has(color)) trunks.set(color,new Map());
-      for (const m of el.members||[]) if (m.type==="way"&&m.geometry&&!/platform|stop/.test(m.role||""))
-        trunks.get(color).set(m.ref||JSON.stringify(m.geometry[0]), m.geometry.map(p=>[p.lon,p.lat])); }
+    if (el.type==="relation" && t.route==="subway"){
+      if (/PATH/i.test(t.network||"")) continue;                          // PATH comes later as its own layer
+      const ref=(t.ref||"").replace(/[<>]/g,"").trim(), color=MTA[ref]||(/^S/.test(ref)?MTA.S:null)||t.colour||"#808183";
+      for (const m of el.members||[]) if (m.type==="way"&&m.geometry&&m.geometry.length>1&&!/platform|stop/.test(m.role||"")){
+        const id=m.ref||JSON.stringify(m.geometry[0]); let w=ways.get(id);
+        if (!w) ways.set(id, w={pts:m.geometry.map(p=>[p.lon,p.lat]), colors:new Set()}); w.colors.add(color); } }
     else if (t.railway==="platform" && !(t.train==="yes" && t.subway!=="yes")){
       const geoms = el.type==="way" ? [el.geometry] : (el.members||[]).filter(m=>m.role==="outer"&&m.geometry).map(m=>m.geometry);
       for (const g of geoms){ if(!g||g.length<2) continue; const c=g.map(p=>[p.lon,p.lat]);
         const closed=c.length>3&&c[0][0]===c[c.length-1][0]&&c[0][1]===c[c.length-1][1];
         plats.push({type:"Feature",properties:{name:t.name||""},geometry:closed?{type:"Polygon",coordinates:[c]}:{type:"LineString",coordinates:c}}); } } }
-  const T={stations:list, entrances, lines:stripeLines(trunks), platforms:{type:"FeatureCollection",features:plats}, sources:raw.sources||[], built:raw.built};
+  const T={stations:list, entrances, lines:{type:"FeatureCollection",features:[]}, ways, platforms:{type:"FeatureCollection",features:plats}, sources:raw.sources||[], built:raw.built};
   T.byId=new Map(list.map(s=>[s.id,s])); T.stIndex=new Map(list.map((s,k)=>[s.id,k]));
   T.nameLower=list.map(s=>s.name.toLowerCase());
   return T;
 }
-/* Interlined routes, MTA-map style: one stripe per trunk colour where trunks share a corridor.
-   1. Each trunk's track is sampled every 15 m. Parallel copies of the same colour (express and local
-      tracks, one relation per direction) are dropped, leaving one centreline per colour.
-   2. A sample's corridor = trunk colours with a centreline within 40 m. Runs shorter than ~250 m are
-      merged into their neighbours so crossings don't make blips.
-   3. Each run becomes a feature with its stripe slot (k of n). Stripes only keep their side if all
-      colours in a corridor point the same way, so every run is aligned with the corridor's first
-      colour, whose runs are oriented once per run. */
-function stripeLines(trunks){
-  const order=c=>{ const k=TRUNKS.indexOf(c); return k<0?99:k; };
-  const colors=[...trunks.keys()].sort((a,b)=>order(a)-order(b));
-  const kx=mlng(40.7), STEP=15, DUP=22, R=40, C=40, MINRUN=17;
-  const X=p=>p[0]*kx, Y=p=>p[1]*MLAT, ck=(x,y)=>Math.floor(x/C)+","+Math.floor(y/C);
-  const sample=line=>{ const out=[line[0]];
-    for (let i=1;i<line.length;i++){ const a=line[i-1], b=line[i], d=Math.hypot(X(b)-X(a),Y(b)-Y(a)), n=Math.max(1,Math.ceil(d/STEP));
-      for (let s=1;s<=n;s++) out.push([a[0]+(b[0]-a[0])*s/n, a[1]+(b[1]-a[1])*s/n]); }
-    return out; };
-  const near=(grid,p,r,fn)=>{ const x=X(p), y=Y(p), gx=Math.floor(x/C), gy=Math.floor(y/C);
-    for (let a=-1;a<=1;a++) for (let b=-1;b<=1;b++){ const L=grid.get((gx+a)+","+(gy+b)); if (!L) continue;
-      for (const q of L){ const dx=q.x-x, dy=q.y-y; if (dx*dx+dy*dy<=r*r && fn(q)===false) return; } } };
-  const put=(grid,q)=>{ const k=ck(q.x,q.y); let L=grid.get(k); if(!L) grid.set(k,L=[]); L.push(q); };
-  // 1 ─ one centreline per colour
-  const pieces=[], all=new Map();
-  colors.forEach((c,ci)=>{
-    const same=new Map(), lines=[...trunks.get(c).values()].map(sample).sort((a,b)=>b.length-a.length);
-    for (const line of lines){
-      const cov=line.map(p=>{ let hit=false; near(same,p,DUP,()=>{ hit=true; return false; }); return hit; });
-      for (let i=0,s=0;i<=cov.length;i++){ if (i===cov.length||cov[i]!==cov[s]){ if (cov[s] && i-s<4) for(let k=s;k<i;k++) cov[k]=false; s=i; } }
-      for (let i=0,s=0;i<=cov.length;i++){
-        if (i<cov.length && cov[i]===cov[s]) continue;
-        if (!cov[s] && i-s>=2){ const pts=line.slice(Math.max(0,s-1),Math.min(line.length,i+1)), pi=pieces.length;
-          pieces.push({ci,pts,sign:new Int8Array(pts.length)});
-          pts.forEach((p,si)=>{ const q={x:X(p),y:Y(p),pi,si,ci}; put(same,q); put(all,q); }); }
-        s=i; }
-    }
-  });
-  // 2 ─ corridor sets per sample, smoothed
-  for (const pc of pieces){
-    const keys=pc.pts.map(p=>{ const set=new Set([pc.ci]); near(all,p,R,q=>{ set.add(q.ci); }); return [...set].sort((a,b)=>a-b).join("."); });
-    for (let pass=0;pass<2;pass++)
-      for (let i=1,s=0;i<=keys.length;i++){ if (i===keys.length||keys[i]!==keys[s]){
-        if (i-s<MINRUN && !(s===0&&i===keys.length)){ const fill=s>0?keys[s-1]:keys[i]; for(let k=s;k<i;k++) keys[k]=fill; } s=i; } }
-    pc.keys=keys;
+/* Interlined subway routes drawn MTA-map style: one stripe per trunk colour where colours share a corridor.
+
+   OSM maps every physical track (local and express, each direction, sometimes stacked levels), so a
+   four-track trunk arrives as four lines 5-40 m apart. Steps:
+   1. Resample every track to ~12 m. Pull each sample toward the mean of nearby parallel samples
+      (a few rounds of mean-shift), so parallel tracks of one corridor collapse onto one centreline
+      while crossing lines are left alone. Smooth the result.
+   2. Per colour, chain OSM ways end to end into long pieces and orient every piece so it flows the
+      same way as the pieces it joins (tangent continuity at shared nodes). Then flip whole colour
+      components to agree with lower-numbered colours they run alongside, so e.g. 2/3 and 4/5 point
+      the same way along Eastern Parkway.
+   3. Drop stretches of a colour that duplicate another stretch of the same colour (its other tracks).
+   4. Each sample's corridor = the colours within ~15 m. Short changes (crossings, station throats)
+      are smoothed away. Each run becomes a LineString with stripe slot k of n; the map turns the slot
+      into a sideways pixel offset, so stripes stay a fixed width at every zoom.                       */
+function stripeLines(ways, colorOrder){
+  const kx=mlng(40.7), STEP=12, R=44, DUP=12, CR=18, MINRUN=12, PAR=0.8;
+  const order=c=>{ const k=colorOrder.indexOf(c); return k<0?99:k; };
+  const W=[...ways.values()].filter(w=>w.pts.length>1);
+  // ── 1. resample in metres, collapse parallel tracks ──
+  const S=[];                                   // flat sample store: x,y (collapsed), ox,oy (original), tx,ty (unit tangent)
+  for (const w of W){
+    const P=w.pts.map(p=>[p[0]*kx,p[1]*MLAT]), idx=[];
+    const push=(x,y)=>{ idx.push(S.length); S.push({x,y,ox:x,oy:y,tx:0,ty:0}); };
+    push(P[0][0],P[0][1]);
+    for (let i=1;i<P.length;i++){ const [x0,y0]=P[i-1],[x1,y1]=P[i], d=Math.hypot(x1-x0,y1-y0), n=Math.max(1,Math.round(d/STEP));
+      for (let s=1;s<=n;s++) push(x0+(x1-x0)*s/n, y0+(y1-y0)*s/n); }
+    for (let i=0;i<idx.length;i++){ const a=S[idx[Math.max(0,i-2)]], b=S[idx[Math.min(idx.length-1,i+2)]], dx=b.ox-a.ox, dy=b.oy-a.oy, L=Math.hypot(dx,dy)||1;
+      S[idx[i]].tx=dx/L; S[idx[i]].ty=dy/L; }
+    w.idx=idx;
   }
-  // 3 ─ runs, oriented against the corridor's reference colour (processed in colour order)
-  const tan=(pts,i)=>{ const a=pts[Math.max(0,i-2)], b=pts[Math.min(pts.length-1,i+2)]; return [X(b)-X(a),Y(b)-Y(a)]; };
+  const C=R, key=(x,y)=>Math.floor(x/C)*100003+Math.floor(y/C);
+  const gridOf=(get)=>{ const g=new Map(); S.forEach((s,i)=>{ const [x,y]=get(s), k=key(x,y); let L=g.get(k); if(!L) g.set(k,L=[]); L.push(i); }); return g; };
+  const around=(g,x,y,fn)=>{ const gx=Math.floor(x/C), gy=Math.floor(y/C);
+    for (let a=-1;a<=1;a++) for (let b=-1;b<=1;b++){ const L=g.get((gx+a)*100003+gy+b); if (L) for (const i of L) fn(i); } };
+  for (let it=0; it<3; it++){
+    const g=gridOf(s=>[s.x,s.y]), nx=new Float64Array(S.length), ny=new Float64Array(S.length);
+    S.forEach((s,i)=>{ let sx=0,sy=0,n=0;
+      around(g,s.x,s.y,j=>{ const q=S[j], dx=q.x-s.x, dy=q.y-s.y; if (dx*dx+dy*dy>R*R) return;
+        if (Math.abs(q.tx*s.tx+q.ty*s.ty)<PAR) return;            // ignore crossing lines
+        const along=dx*s.tx+dy*s.ty; if (Math.abs(along)>STEP*1.5) return;   // stay level: average across, not along
+        sx+=q.x; sy+=q.y; n++; });
+      nx[i]=n?sx/n:s.x; ny[i]=n?sy/n:s.y; });
+    S.forEach((s,i)=>{ s.x=nx[i]; s.y=ny[i]; });
+  }
+  for (const w of W){ const I=w.idx, xs=I.map(i=>S[i].x), ys=I.map(i=>S[i].y);   // light smoothing, ends pinned
+    for (let i=2;i<I.length-2;i++){ S[I[i]].x=(xs[i-2]+xs[i-1]+xs[i]+xs[i+1]+xs[i+2])/5; S[I[i]].y=(ys[i-2]+ys[i-1]+ys[i]+ys[i+1]+ys[i+2])/5; } }
+
+  // ── 2. chains per colour, oriented by flow ──
+  const colors=[...new Set(W.flatMap(w=>[...w.colors]))].sort((a,b)=>order(a)-order(b));
+  const ek=p=>p[0].toFixed(7)+","+p[1].toFixed(7);
+  const pieces=[];                               // {c, idx:[sample ids], comp}
+  const flowAt=(pc,atStart)=>{ const I=pc.idx, a=S[I[atStart?0:I.length-1]], b=S[I[atStart?Math.min(3,I.length-1):Math.max(0,I.length-4)]];
+    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1; return [dx/L,dy/L]; };      // unit vector pointing away from that end, into the piece
+  colors.forEach(c=>{
+    const mine=W.filter(w=>w.colors.has(c)), deg=new Map();
+    mine.forEach((w,wi)=>{ for (const e of [0,1]){ const k=ek(w.pts[e?w.pts.length-1:0]); if(!deg.has(k)) deg.set(k,[]); deg.get(k).push([wi,e]); } });
+    const used=new Uint8Array(mine.length), chainsHere=[];
+    for (let s=0;s<mine.length;s++){ if (used[s]) continue; used[s]=1;
+      let seq=[[s,false]];                        // [way index, reversed?]
+      for (const dir of [1,-1]){                   // grow forward from the end, then backward from the start
+        for(;;){ const [wi,rev]=dir===1?seq[seq.length-1]:seq[0], w=mine[wi];
+          const endIsLast=(dir===1)!==rev, k=ek(w.pts[endIsLast?w.pts.length-1:0]), L=deg.get(k);
+          if (L.length!==2) break; const [nw,ne]=L[0][0]===wi?L[1]:L[0]; if (used[nw]) break; used[nw]=1;
+          const nrev = dir===1 ? ne===1 : ne===0;
+          if (dir===1) seq.push([nw,nrev]); else seq.unshift([nw,nrev]); } }
+      const idx=[]; for (const [wi,rev] of seq){ const I=rev?mine[wi].idx.slice().reverse():mine[wi].idx; idx.push(...(idx.length?I.slice(1):I)); }
+      const w0=mine[seq[0][0]], wN=mine[seq[seq.length-1][0]];
+      const k0=ek(seq[0][1]?w0.pts[w0.pts.length-1]:w0.pts[0]), k1=ek(seq[seq.length-1][1]?wN.pts[0]:wN.pts[wN.pts.length-1]);
+      chainsHere.push({c,idx,k0,k1,flip:0,len:idx.length});
+    }
+    // orient by flow continuity at shared nodes (BFS), ignoring near-perpendicular joins
+    const at=new Map(); chainsHere.forEach((ch,i)=>{ for (const [k,st] of [[ch.k0,true],[ch.k1,false]]){ if(!at.has(k)) at.set(k,[]); at.get(k).push([i,st]); } });
+    const seen=new Int8Array(chainsHere.length); let comp=0;
+    for (const start of chainsHere.map((_,i)=>i).sort((a,b)=>chainsHere[b].len-chainsHere[a].len)){
+      if (seen[start]) continue; seen[start]=1; chainsHere[start].flip=1; chainsHere[start].comp=comp; const q=[start];
+      while (q.length){ const i=q.shift(), ch=chainsHere[i];
+        for (const [k,st] of [[ch.k0,true],[ch.k1,false]]){
+          const away=flowAt(ch,st), myFlow= (st===(ch.flip===1)) ? away : [-away[0],-away[1]];   // direction of travel at this node
+          for (const [j,st2] of at.get(k)){ if (j===i||seen[j]) continue; const a=flowAt(chainsHere[j],st2), d=myFlow[0]*a[0]+myFlow[1]*a[1];
+            if (Math.abs(d)<0.5) continue;
+            seen[j]=1; chainsHere[j].comp=comp; chainsHere[j].flip = ((d>0)===st2) ? 1 : -1; q.push(j); } } }
+      comp++; }
+    chainsHere.forEach(ch=>{ if (ch.flip===-1) ch.idx.reverse(); pieces.push({c,idx:ch.idx,comp:c+"#"+ch.comp}); });
+  });
+  // flip whole components to agree with lower colours they run alongside
+  const tanOf=(I,i)=>{ const a=S[I[Math.max(0,i-2)]], b=S[I[Math.min(I.length-1,i+2)]], dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1; return [dx/L,dy/L]; };
+  const done=new Map(), put=(i,t,c)=>{ const s=S[i], k=key(s.x,s.y); let L=done.get(k); if(!L) done.set(k,L=[]); L.push({x:s.x,y:s.y,t,c}); };
+  colors.forEach(c=>{
+    const mine=pieces.filter(p=>p.c===c), vote=new Map();
+    for (const p of mine) p.idx.forEach((i,n)=>{ const s=S[i], t=tanOf(p.idx,n); let v=0;
+      const gx=Math.floor(s.x/C), gy=Math.floor(s.y/C);
+      for (let a=-1;a<=1;a++) for (let b=-1;b<=1;b++){ const L=done.get((gx+a)*100003+gy+b); if (L) for (const q of L){
+        if ((q.x-s.x)**2+(q.y-s.y)**2>CR*CR) continue; const d=q.t[0]*t[0]+q.t[1]*t[1]; if (Math.abs(d)>PAR){ v+=Math.sign(d); } } }
+      if (v) vote.set(p.comp,(vote.get(p.comp)||0)+Math.sign(v)); });
+    for (const p of mine){ if ((vote.get(p.comp)||0)<0) p.idx.reverse(); p.idx.forEach((i,n)=>put(i,tanOf(p.idx,n),c)); }
+  });
+
+  // ── 3. drop same-colour duplicates (the other tracks of a corridor) ──
+  const kept=[], keptGrid=new Map();
+  const addKept=(pc)=>{ const ki=kept.length; kept.push(pc); pc.idx.forEach((i,n)=>{ const s=S[i], k=key(s.x,s.y); let L=keptGrid.get(k); if(!L) keptGrid.set(k,L=[]); L.push([ki,n]); }); };
+  const nearKept=(x,y,t,rad,fn)=>{ const gx=Math.floor(x/C), gy=Math.floor(y/C);
+    for (let a=-1;a<=1;a++) for (let b=-1;b<=1;b++){ const L=keptGrid.get((gx+a)*100003+gy+b); if (!L) continue;
+      for (const [ki,n] of L){ const pc=kept[ki], s=S[pc.idx[n]]; if ((s.x-x)**2+(s.y-y)**2>rad*rad) continue;
+        const u=tanOf(pc.idx,n); if (Math.abs(u[0]*t[0]+u[1]*t[1])<PAR) continue; fn(pc,n,u); } } };
+  for (const c of colors){
+    for (const p of pieces.filter(p=>p.c===c).sort((a,b)=>b.idx.length-a.idx.length)){
+      const cov=p.idx.map((i,n)=>{ const s=S[i]; let hit=false; nearKept(s.x,s.y,tanOf(p.idx,n),DUP,pc=>{ if(pc.c===c) hit=true; }); return hit; });
+      for (const v of [true,false]) for (let i=0,s=0;i<=cov.length;i++){      // fill short gaps both ways
+        if (i===cov.length||cov[i]!==cov[s]){ if (cov[s]===v && i-s<(v?3:5) && s>0 && i<cov.length) for(let k=s;k<i;k++) cov[k]=!v; s=i; } }
+      for (let i=0,s=0;i<=cov.length;i++){ if (i<cov.length&&cov[i]===cov[s]) continue;
+        if (!cov[s] && i-s>=2) addKept({c,idx:p.idx.slice(Math.max(0,s-1),Math.min(p.idx.length,i+1))}); s=i; }
+    }
+  }
+
+  // ── 4. corridors, runs, stripes ──
   const feats=[];
-  for (const pc of pieces.slice().sort((a,b)=>a.ci-b.ci)){
+  kept.forEach(pc=>{ pc.keys=pc.idx.map((i,n)=>{ const s=S[i], set=new Set([pc.c]); nearKept(s.x,s.y,tanOf(pc.idx,n),CR,q=>set.add(q.c));
+      return [...set].sort((a,b)=>order(a)-order(b)).join("|"); });
+    const K=pc.keys;
+    for (let pass=0;pass<2;pass++) for (let i=1,s=0;i<=K.length;i++){ if (i===K.length||K[i]!==K[s]){
+      if (i-s<MINRUN && !(s===0&&i===K.length)){ const fill=s>0?K[s-1]:K[i]; for(let k=s;k<i;k++) K[k]=fill; } s=i; } } });
+  const back=(x,y)=>[+(x/kx).toFixed(6), +(y/MLAT).toFixed(6)];
+  for (const pc of kept){
     for (let i=1,s=0;i<=pc.keys.length;i++){
       if (i<pc.keys.length && pc.keys[i]===pc.keys[s]) continue;
-      const set=pc.keys[s].split(".").map(Number), a=Math.max(0,s-1), b=Math.min(pc.pts.length,i+1);
-      let seg=pc.pts.slice(a,b), flip=false;
-      if (set.length>1){
-        const ref=set[0], m=Math.floor((a+b)/2), t=tan(pc.pts,m);
-        if (ref===pc.ci){ const d=[X(seg[seg.length-1])-X(seg[0]),Y(seg[seg.length-1])-Y(seg[0])]; flip=Math.abs(d[0])>=Math.abs(d[1])?d[0]<0:d[1]<0; }
-        else { let best=null, bd=Infinity;
-          near(all,pc.pts[m],R*1.5,q=>{ if (q.ci!==ref) return; const dx=q.x-X(pc.pts[m]), dy=q.y-Y(pc.pts[m]), d=dx*dx+dy*dy; if (d<bd){bd=d;best=q;} });
-          if (best){ const rp=pieces[best.pi], rt=tan(rp.pts,best.si), sg=rp.sign[best.si]||1; flip=(t[0]*rt[0]+t[1]*rt[1])*sg<0; }
-          else { const d=[X(seg[seg.length-1])-X(seg[0]),Y(seg[seg.length-1])-Y(seg[0])]; flip=Math.abs(d[0])>=Math.abs(d[1])?d[0]<0:d[1]<0; } }
-      }
-      for (let k=a;k<b;k++) pc.sign[k]=flip?-1:1;
-      if (flip) seg=seg.reverse();
-      feats.push({type:"Feature",properties:{color:colors[pc.ci],k:set.indexOf(pc.ci),n:set.length},geometry:{type:"LineString",coordinates:seg}});
+      const set=pc.keys[s].split("|"), a=Math.max(0,s-1), b=Math.min(pc.idx.length,i+1);
+      let pts=pc.idx.slice(a,b).map(j=>back(S[j].x,S[j].y));
+      if (set.length>1 && set[0]!==pc.c){                       // safety net: point the same way as the corridor's first colour here
+        const m=pc.idx[Math.floor((a+b)/2)], t=tanOf(pc.idx,Math.floor((a+b)/2)); let best=null,bd=1e18;
+        nearKept(S[m].x,S[m].y,t,CR*1.5,(q,n,u)=>{ if (q.c!==set[0]) return; const d=(S[q.idx[n]].x-S[m].x)**2+(S[q.idx[n]].y-S[m].y)**2; if (d<bd){bd=d;best=u;} });
+        if (best && best[0]*t[0]+best[1]*t[1]<0) pts.reverse(); }
+      if (pts.length>1) feats.push({type:"Feature",properties:{color:pc.c,k:set.indexOf(pc.c),n:set.length},geometry:{type:"LineString",coordinates:simplify(pts,0.6)}});
       s=i;
     }
   }
   return {type:"FeatureCollection",features:feats};
+}
+function simplify(pts, tolM){                     // Douglas-Peucker in metres; keeps line-offset from zigzagging
+  if (pts.length<3) return pts; const kx=mlng(40.7), P=pts.map(p=>[p[0]*kx,p[1]*MLAT]), keep=new Uint8Array(pts.length); keep[0]=keep[pts.length-1]=1;
+  const st=[[0,pts.length-1]];
+  while (st.length){ const [a,b]=st.pop(); let md=0, mi=-1; const [ax,ay]=P[a],[bx,by]=P[b], L=Math.hypot(bx-ax,by-ay)||1;
+    for (let i=a+1;i<b;i++){ const d=Math.abs((bx-ax)*(ay-P[i][1])-(ax-P[i][0])*(by-ay))/L; if (d>md){md=d;mi=i;} }
+    if (md>tolM){ keep[mi]=1; st.push([a,mi],[mi,b]); } }
+  return pts.filter((_,i)=>keep[i]);
 }
 async function loadTransit(){
   const [w,s,e,n]=NYC_BOX;                     // whole city, so new lot releases need no transit rebuild
@@ -753,9 +833,29 @@ async function loadTransit(){
   }
   st.T=buildTransit(raw);
   const T=st.T;
-  $("#subStatus").textContent=`Subway data: ${T.stations.length} stations, ${T.entrances.length} entrances, ${T.lines.features.length} route lines, ${T.platforms.features.length} platform shapes. Sources: MTA Open Data; © OpenStreetMap contributors.`;
-  drawTransit();
+  const status=()=>$("#subStatus").textContent=`Subway data: ${T.stations.length} stations, ${T.entrances.length} entrances, ${T.lines.features.length?T.lines.features.length+" route line segments":"route lines drawing…"}, ${T.platforms.features.length} platform shapes. Sources: MTA Open Data; © OpenStreetMap contributors.`;
+  status(); drawTransit();
+  routeLines(T.ways, raw.built).then(fc=>{ if (st.T!==T) return; T.lines=fc; delete T.ways; status();
+    if (map&&map.getSource("sub-line")) map.getSource("sub-line").setData(fc); });
   if (st.pending){ const p=st.pending; st.pending=null; restore(p.sels,p.view,true); } else if (st.sels.length){ drawSelection(); renderProfile(); }
+}
+/* Route lines are built off the main thread (a Web Worker made from the same functions) so the map
+   never freezes, and cached in the browser so repeat visits skip the work entirely. */
+const LINES_VERSION="s2";
+async function routeLines(ways, built){
+  const key=`lp-lines-${LINES_VERSION}-${built||"live"}-${ways.size}`;
+  try{ const c=localStorage.getItem(key); if (c) return JSON.parse(c); }catch(_){}
+  const packed=[...ways].map(([k,w])=>[k,{pts:w.pts,colors:[...w.colors]}]);
+  let fc;
+  try{
+    const src=`const MLAT=${MLAT}, mlng=lat=>111320*Math.cos(lat*Math.PI/180);\n${stripeLines}\n${simplify}\n`+
+      `onmessage=e=>{ const ways=new Map(e.data.ways.map(([k,v])=>[k,{pts:v.pts,colors:new Set(v.colors)}])); postMessage(stripeLines(ways,e.data.order)); };`;
+    const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"})), w=new Worker(url);
+    fc=await new Promise((ok,bad)=>{ w.onmessage=e=>ok(e.data); w.onerror=bad; w.postMessage({ways:packed,order:TRUNKS}); });
+    w.terminate(); URL.revokeObjectURL(url);
+  }catch(err){ console.warn("route lines on main thread:", err&&err.message); fc=stripeLines(ways,TRUNKS); }
+  try{ for (const k of Object.keys(localStorage)) if (k.startsWith("lp-lines-")) localStorage.removeItem(k); localStorage.setItem(key,JSON.stringify(fc)); }catch(_){}
+  return fc;
 }
 function drawTransit(){
   const T=st.T; if (!T||!map||!map.getSource("sub-st")) return;
