@@ -1,17 +1,9 @@
-"""
-pluto_io.py — dependency-free readers for the MapPLUTO shapefiles exported
-from ArcGIS, plus NY State Plane Long Island (EPSG:2263) -> WGS84.
-
-No pyshp / pyproj / shapely needed: the .shp and .dbf formats are simple
-fixed binary layouts, and the projection is a Lambert Conformal Conic
-inverse (GRS80; NAD83 ~= WGS84 to well under a metre for mapping).
-"""
+"""pluto_io.py — dependency-free readers for the MapPLUTO shapefiles exported"""
 import math, re, struct
 import numpy as np
 
-# ── EPSG:2263 parameters (read from the .prj, hard defaults here) ──────────
-FT = 1200 / 3937                      # US survey foot in metres
-A, INV_F = 6378137.0, 298.257222101   # GRS80
+FT = 1200 / 3937
+A, INV_F = 6378137.0, 298.257222101
 E2 = (2 - 1 / INV_F) / INV_F
 E = math.sqrt(E2)
 LAT1, LAT2 = math.radians(40 + 40 / 60), math.radians(41 + 2 / 60)
@@ -28,7 +20,6 @@ _F = _m(LAT1) / (_N * _t(LAT1) ** _N)
 _RHO0 = A * _F * _t(LAT0) ** _N
 
 def sp_to_lnglat(x_ft, y_ft):
-    """Vectorised inverse LCC: arrays of State Plane feet -> (lng, lat) degrees."""
     x = np.asarray(x_ft, dtype=np.float64) * FT - FE
     y = _RHO0 - (np.asarray(y_ft, dtype=np.float64) * FT - FN)
     rho = np.sign(_N) * np.hypot(x, y)
@@ -36,12 +27,11 @@ def sp_to_lnglat(x_ft, y_ft):
     theta = np.arctan2(x, y)
     lng = theta / _N + LON0
     phi = np.pi / 2 - 2 * np.arctan(t)
-    for _ in range(8):                               # converges in ~4
+    for _ in range(8):
         s = np.sin(phi)
         phi = np.pi / 2 - 2 * np.arctan(t * ((1 - E * s) / (1 + E * s)) ** (E / 2))
     return np.degrees(lng), np.degrees(phi)
 
-# ── .dbf ───────────────────────────────────────────────────────────────────
 def read_dbf(path, encoding="utf-8"):
     with open(path, "rb") as f:
         data = f.read()
@@ -66,9 +56,7 @@ def read_dbf(path, encoding="utf-8"):
             cols[name].append(v)
     return n, cols
 
-# ── .shp (polygon, type 5) ─────────────────────────────────────────────────
 def read_shp_polygons(path):
-    """Yield, per record, a list of rings; each ring is an (k,2) float array in feet."""
     with open(path, "rb") as f:
         data = f.read()
     pos, out = 100, []
@@ -91,7 +79,6 @@ def signed_area(ring):
     return 0.5 * float(np.dot(x[:-1], y[1:]) - np.dot(x[1:], y[:-1]))
 
 def group_polygons(rings):
-    """Shapefile convention: clockwise ring = exterior, counter-clockwise = hole."""
     polys = []
     for r in rings:
         if len(r) < 4: continue
@@ -100,7 +87,6 @@ def group_polygons(rings):
     return polys
 
 def read_release(xml_path):
-    """Pull 'MapPLUTO 25v4' style release id from the ArcGIS metadata xml."""
     try:
         txt = open(xml_path, encoding="utf-8", errors="ignore").read()
     except OSError:
