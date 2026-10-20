@@ -35,7 +35,7 @@ def rebuild_tiles(release, out, far=None):
     if not os.path.exists(src):
         print(f"  (no {src}; rebuild the release with build.py to add FAR to the lot tiles)"); return
     g = gpd.read_parquet(src)
-    g = g[[c for c in ("i", "lu", "ub", "zn", "yb", "bf", "geometry")]]
+    g = g[[c for c in ("i", "lu", "ub", "zn", "yb", "bf", "fl", "geometry") if c in g.columns]]
     if far:
         for k, v in far.items(): g[k] = v
     L.write_tiles(os.path.join(out, "lots.pmtiles"), g, "lots", L.LOT_TILE_MINZOOM, 16, name=f"Lot Profiler {release} lots")

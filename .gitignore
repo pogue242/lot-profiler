@@ -5,3 +5,5 @@ tools/bench.py
 __pycache__/
 *.pyc
 far/README.md
+coming_soon.html
+tools/floors.py

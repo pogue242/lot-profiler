@@ -67,9 +67,11 @@ def main():
     with open(os.path.join(out, "areas.json.gz"), "wb") as fh: fh.write(gzip.compress(json.dumps(polys, separators=(",", ":")).encode(), 9))
 
     bfar = P["bfar"].astype(np.float32)
+    floors = L.whole_floors([np.nan if v is None else v for v in rec.get("NumFloors", [None] * n)])
     bf100 = np.where(np.isnan(bfar), -1, np.round(np.minimum(bfar, 600) * 100)).astype(np.int32)
     props = pd.DataFrame({"i": np.arange(n, dtype=np.int32), "lu": P["lu"].astype(np.int16), "ub": P["ub"].astype(np.int16),
-                          "zn": P["zone"].astype(np.int16), "yb": P["year"].astype(np.int16), "bf": bf100})
+                          "zn": P["zone"].astype(np.int16), "yb": P["year"].astype(np.int16), "bf": bf100,
+                          "fl": floors.astype(np.int16)})
     os.makedirs(os.path.join(ROOT, "work"), exist_ok=True)
     gpd.GeoDataFrame(props, geometry=geoms, crs=4326).to_parquet(os.path.join(ROOT, "work", f"{release}_lots.parquet"))
     L.write_tiles(os.path.join(out, "blocks.pmtiles"), L.tile_frame(bgeoms, pd.DataFrame({"b": np.arange(len(keys), dtype=np.int32)})),
@@ -83,7 +85,7 @@ def main():
               "files": {"tiles": "lots.pmtiles", "blockTiles": "blocks.pmtiles", "geom": "geom.bin", "rec": "rec.bin",
                         "addr": "addr.txt.gz", "areas": "areas.json.gz"}, "far": None}
     sections = {"dcx": np.diff(cxq, prepend=0).astype(np.int32), "dcy": np.diff(cyq, prepend=0).astype(np.int32), "box": box.ravel(),
-                "area": P["area"].astype(np.uint32), "units": P["units"].astype(np.uint16), "bfar": np.where(np.isnan(bfar), 65535, np.round(np.clip(bfar, 0, 655) * 100)).astype(np.uint16), "year": P["year"].astype(np.uint16),
+                "area": P["area"].astype(np.uint32), "units": P["units"].astype(np.uint16), "bfar": np.where(np.isnan(bfar), 65535, np.round(np.clip(bfar, 0, 655) * 100)).astype(np.uint16), "year": P["year"].astype(np.uint16), "floors": floors,
                 "lu": P["lu"].astype(np.uint8), "ub": P["ub"].astype(np.uint8), "zone": P["zone"].astype(np.uint16),
                 "nta": P["nta"].astype(np.uint16), "tract": P["tract"].astype(np.uint16), "blk": blk, "lotno": lotno, "blkKey": keys,
                 "gOff": g_off.astype(np.uint32), "bOff": b_off.astype(np.uint32), "rOff": r_off.astype(np.uint32)}

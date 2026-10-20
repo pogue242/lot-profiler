@@ -102,6 +102,7 @@ def main():
     agree = np.abs(np.round(bfar[both], 2) - pf[both]) <= 0.011
     print(f"  built FAR: BldgArea/LotArea matches PLUTO BuiltFAR (±0.01) on {agree.mean()*100:.2f}% of {both.sum():,} lots", flush=True)
     year = df.YearBuilt.fillna(0).clip(0, 65535).astype(np.uint16).values
+    floors = L.whole_floors(df.NumFloors.to_numpy(np.float64) if "NumFloors" in df.columns else np.zeros(n))
     zones = sorted({z for z in df.ZoneDist1.fillna("") if z is not None})
     zi = {z: k for k, z in enumerate(zones)}
     zone = np.array([zi[z or ""] for z in df.ZoneDist1.fillna("")], np.uint16)
@@ -181,7 +182,8 @@ def main():
 
     bf100 = np.where(np.isnan(bfar), -1, np.round(np.minimum(bfar, 600) * 100)).astype(np.int32)
     props = pd.DataFrame({"i": np.arange(n, dtype=np.int32), "lu": lu.astype(np.int16), "ub": ub.astype(np.int16),
-                          "zn": zone.astype(np.int16), "yb": year.astype(np.int16), "bf": bf100})
+                          "zn": zone.astype(np.int16), "yb": year.astype(np.int16), "bf": bf100,
+                          "fl": floors.astype(np.int16)})
     os.makedirs(a.work, exist_ok=True)
     gpd.GeoDataFrame(props, geometry=g, crs=4326).to_parquet(os.path.join(a.work, f"{release}_lots.parquet"))
     if a.tiles in ("all", "lots"):
@@ -200,11 +202,12 @@ def main():
         "files": {"tiles": "lots.pmtiles", "blockTiles": "blocks.pmtiles", "geom": "geom.bin", "rec": "rec.bin",
                   "addr": "addr.txt.gz", "areas": "areas.json.gz"},
         "tileProps": {"i": "lot index", "lu": "land use", "ub": "building size band", "zn": "zoning index",
-                      "yb": "year built", "bf": "built FAR x100 (-1 = none)"},
+                      "yb": "year built", "bf": "built FAR x100 (-1 = none)",
+                      "fl": "whole floors, half stories counted down (0 = unknown)"},
         "far": None,
     }
     sections = {"dcx": dcx, "dcy": dcy, "box": box.ravel(), "area": np.clip(np.nan_to_num(la, nan=0), 0, 2**32 - 1).astype(np.uint32),
-                "units": units.astype(np.uint16), "bfar": np.where(np.isnan(bfar), 65535, np.round(np.clip(bfar, 0, 655) * 100)).astype(np.uint16), "year": year, "lu": lu, "ub": ub, "zone": zone,
+                "units": units.astype(np.uint16), "bfar": np.where(np.isnan(bfar), 65535, np.round(np.clip(bfar, 0, 655) * 100)).astype(np.uint16), "year": year, "floors": floors, "lu": lu, "ub": ub, "zone": zone,
                 "nta": nta, "tract": tract, "blk": blk.astype(np.uint32), "lotno": lotno, "blkKey": keys.astype(np.uint32),
                 "gOff": g_off.astype(np.uint32), "bOff": b_off.astype(np.uint32), "rOff": r_off.astype(np.uint32)}
     raw, size = L.write_pack(os.path.join(out, "core.lpk"), b"LPK3", header, sections)

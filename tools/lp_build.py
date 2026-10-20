@@ -30,6 +30,11 @@ def unit_band(units, lu):
     band[(u <= 0) | ~res] = 255
     return band.astype(np.uint8)
 
+def whole_floors(numfloors):
+    f = np.asarray(numfloors, np.float64)
+    out = np.where(np.isnan(f) | (f <= 0), 0, np.clip(np.floor(np.nan_to_num(f)), 1, 255))
+    return out.astype(np.uint8)
+
 def varints(z):
     z = np.asarray(z, np.uint64)
     nb = 1 + sum((z >= np.uint64(1 << (7 * k))).astype(np.int64) for k in range(1, 5))

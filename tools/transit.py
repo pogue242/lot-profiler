@@ -16,7 +16,8 @@ OVERPASS = ["https://overpass-api.de/api/interpreter",
             "https://overpass.kumi.systems/api/interpreter",
             "https://overpass.private.coffee/api/interpreter"]
 NYC = [-74.26, 40.49, -73.70, 40.92]
-UA = {"User-Agent": "LotProfiler/1.6 (transit.py)"}
+UA = {"User-Agent": "LotProfiler/1.7 (transit.py)"}
+RAIL_GTFS = {"LIRR": "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip", "MNR": "https://rrgtfsfeeds.s3.amazonaws.com/gtfsmnr.zip"}
 
 TRUNK = {"A": "ACE", "C": "ACE", "E": "ACE", "B": "BDFM", "D": "BDFM", "F": "BDFM", "FX": "BDFM", "M": "BDFM",
          "G": "G", "J": "JZ", "Z": "JZ", "L": "L", "N": "NQRW", "Q": "NQRW", "R": "NQRW", "W": "NQRW",
@@ -526,6 +527,77 @@ def path_stations(osm):
                     "routes": sorted(f["routes"], key=lambda r: PATH_ORDER.index(r) if r in PATH_ORDER else 9)})
     return out
 
+def rail_stations(feeds, bbox):
+    """LIRR and Metro-North stations inside bbox from the MTA's GTFS feeds, with the branches that stop there."""
+    w, s, e, n = bbox
+    out = []
+    for net, gz in feeds.items():
+        z = zipfile.ZipFile(io.BytesIO(gz))
+        rd = lambda f: list(csv.DictReader(io.StringIO(z.read(f).decode("utf-8-sig"))))
+        routes = {r["route_id"]: (r.get("route_long_name") or r.get("route_short_name") or "").strip() for r in rd("routes.txt")}
+        rcol = {r["route_id"]: "#" + (r.get("route_color") or "4F5B66").strip() for r in rd("routes.txt")}
+        trip_route = {t["trip_id"]: t["route_id"] for t in rd("trips.txt")}
+        served = collections.defaultdict(set)
+        for st in rd("stop_times.txt"):
+            rid = trip_route.get(st["trip_id"])
+            if rid: served[st["stop_id"]].add(rid)
+        for stp in rd("stops.txt"):
+            if (stp.get("location_type") or "0") not in ("0", ""): continue
+            la, lo = float(stp["stop_lat"]), float(stp["stop_lon"])
+            if not (s <= la <= n and w <= lo <= e): continue
+            rids = sorted((r for r in served.get(stp["stop_id"], ()) if not re.search(r"Terminal Zone", routes.get(r, ""))), key=lambda r: routes.get(r, r))
+            if not rids or re.search(r"\b(Yard|Facility)\b", stp["stop_name"]): continue
+            out.append({"net": net, "name": stp["stop_name"].strip(), "lng": round(lo, 6), "lat": round(la, 6), "code": stp.get("stop_code") or stp["stop_id"],
+                        "routes": [routes[r] for r in rids], "colors": {routes[r]: rcol[r] for r in rids}})
+    return out
+
+def rail_entrances(osm, stations, reach=300.0):
+    """OpenStreetMap train-station entrances, each joined to the nearest LIRR / Metro-North station within reach (m)."""
+    out = []
+    for el in (osm or {}).get("elements", []):
+        t = el.get("tags", {})
+        if el.get("type") != "node" or t.get("railway") != "train_station_entrance": continue
+        best = min(range(len(stations)), key=lambda k: math.hypot((stations[k]["lng"] - el["lon"]) * KX, (stations[k]["lat"] - el["lat"]) * KY), default=None)
+        if best is None or math.hypot((stations[best]["lng"] - el["lon"]) * KX, (stations[best]["lat"] - el["lat"]) * KY) > reach: continue
+        out.append({"station": best, "lng": round(el["lon"], 6), "lat": round(el["lat"], 6), "type": "Elevator" if t.get("elevator") == "yes" or t.get("entrance") == "elevator" else "Entrance"})
+    return out
+
+def near_lots(stations, parquet, reach):
+    """Keep stations within reach (m) of a lot centroid in the release's lot file (work/<release>_lots.parquet)."""
+    import geopandas as gpd
+    pts = gpd.read_parquet(parquet, columns=["geometry"]).geometry.representative_point()
+    cell = 0.01; grid = set()
+    for x, y in zip(pts.x.values, pts.y.values): grid.add((int(x // cell), int(y // cell)))
+    xs = collections.defaultdict(list)
+    for x, y in zip(pts.x.values, pts.y.values): xs[(int(x // cell), int(y // cell))].append((x, y))
+    def ok(st):
+        cx, cy = int(st["lng"] // cell), int(st["lat"] // cell)
+        return any(math.hypot((x - st["lng"]) * KX, (y - st["lat"]) * KY) <= reach
+                   for a in (-1, 0, 1) for b in (-1, 0, 1) for x, y in xs.get((cx + a, cy + b), ()))
+    return [st for st in stations if ok(st)]
+
+def add_rail(snapshot, date, release, bbox, near=None, reach=804.7):
+    """Add LIRR and Metro-North stations (MTA GTFS) and, when OpenStreetMap answers, their entrances to an existing snapshot."""
+    old = json.load(open(snapshot, encoding="utf-8"))
+    feeds = {}
+    for net, url in RAIL_GTFS.items():
+        print(f"  downloading {url} …"); feeds[net] = get(url)
+    rs = rail_stations(feeds, bbox)
+    if near: n0 = len(rs); rs = near_lots(rs, near, reach); print(f"  {len(rs)} of {n0} stations are within {reach:.0f} m of a lot in {os.path.basename(near)}")
+    w, s, e, n = bbox
+    osm = overpass(f"[out:json][timeout:120];node[\"railway\"=\"train_station_entrance\"]({s},{w},{n},{e});out;", need=False)
+    ents = rail_entrances(osm, rs) if osm else []
+    if not ents: print("  No entrances from OpenStreetMap (Overpass busy or none mapped); LIRR / Metro-North walksheds will use the station point until you rerun this")
+    keep = [x for x in old.get("other_stations", []) if x.get("net") not in ("LIRR", "MNR")]
+    base = len(keep)
+    old["other_stations"] = keep + rs
+    old["other_entrances"] = [{**x, "station": base + x["station"]} for x in ents]
+    old["date"], old["built"] = date, time.strftime("%Y-%m-%d")
+    old["sources"] = [x for x in old.get("sources", []) if "LIRR" not in x] + ["MTA LIRR and Metro-North GTFS (stations)"] + (["© OpenStreetMap contributors (rail entrances)"] if ents else [])
+    path = save_snapshot(old, date, release)
+    c = collections.Counter(x["net"] for x in rs)
+    print(f"{c['LIRR']} LIRR and {c['MNR']} Metro-North stations, {len(ents)} entrances -> data/{os.path.basename(path)}")
+
 def save_snapshot(out, date, release):
     name = f"transit_{date}.json"
     path = os.path.join(DATA, name)
@@ -555,6 +627,8 @@ def main():
     ap.add_argument("--no-rail", action="store_true", help="leave out PATH, LIRR and Metro-North")
     ap.add_argument("--stations"); ap.add_argument("--entrances"); ap.add_argument("--osm"); ap.add_argument("--gtfs")
     ap.add_argument("--branches", help="MTA Rail Branches GeoJSON you downloaded yourself (LIRR + Metro-North)")
+    ap.add_argument("--add-rail", metavar="SNAPSHOT", help="copy this snapshot and add LIRR / Metro-North stations and entrances (dated --date)")
+    ap.add_argument("--near", metavar="PARQUET", help="with --add-rail: keep stations within ½ mile of a lot in this lot file (e.g. work/26v2_lots.parquet)")
     a = ap.parse_args()
     w, s, e, n = study_bbox(a.pad) if a.study else NYC
     bbox = [w, s, e, n]
@@ -562,6 +636,7 @@ def main():
     today = time.strftime("%Y-%m-%d")
     date = a.date or today
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date): sys.exit("--date needs the form YYYY-MM-DD")
+    if a.add_rail: return add_rail(a.add_rail, date, a.release, bbox, a.near)
 
     old = json.load(open(a.reuse)) if a.reuse else None
     if old:
@@ -602,7 +677,7 @@ def main():
             except Exception as err: print(f"  failed ({err.__class__.__name__})")
         if gz is None: sys.exit("Couldn't download the MTA GTFS feed. Download gtfs_subway.zip yourself and pass --gtfs gtfs_subway.zip")
     lines, feed = subway_lines(gz, bbox)
-    other_st = (path_stations(osm) + lightrail_stations(osm)) if osm and not a.no_rail else [x for x in (old or {}).get("other_stations", []) if not a.no_rail]
+    other_st = (path_stations(osm) + lightrail_stations(osm)) if osm and not a.no_rail else [x for x in (old or {}).get("other_stations", []) if not a.no_rail and x.get("net") not in ("LIRR", "MNR")]
     st_pts = [latlon(norm(r), ["gtfslatitude", "latitude"], ["gtfslongitude", "longitude"])[::-1] for r in keep_st]
     st_pts = [p for p in st_pts if p[0] is not None] + [(x["lng"], x["lat"]) for x in other_st]
     if osm: plat = platforms(osm, st_pts)
