@@ -1633,7 +1633,7 @@ function setMode(m){
   $$("#tools button,#measBtn").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
   const h=$("#hint"), kh=keysHint(m), th=st.tapMode&&m!=="view"&&m!=="measure"?`<span class="cliphint">${TAP_TEXT[st.tapMode]}</span>`:""; h.hidden=!HINTS[m]&&!kh&&!th;
   const tb=$("#tools"); h.style.top=matchMedia("(max-width:820px)").matches?(tb.offsetTop+tb.offsetHeight+6)+"px":"";
-  h.innerHTML=(HINTS[m]?esc(HINTS[m])+(m==="radius"?[["¼ mi",402.3],["½ mi",804.7],["1 mi",1609.3],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
+  h.innerHTML=(HINTS[m]?`<span>${esc(HINTS[m])}</span>`+(m==="radius"?[["¼ mi",402.3],["½ mi",804.7],["1 mi",1609.3],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
     +(m==="measure"?` <button data-mk="line" class="${meas.kind==="line"?"on":""}">Distance</button><button data-mk="area" class="${meas.kind==="area"?"on":""}">Area</button><button data-mdone>Done</button><button data-mclear>Clear</button> <b id="measOut">${measText()}</b>`:"")
     +(m==="radius"||m==="poly"?` <span class="cliphint">Lot inclusion: <b>${CLIP_NAME[st.clip]}</b> (change with ▾)</span>`:"")
     +(st.addTo!=null&&st.sels[st.addTo]?` <span class="cliphint">Adding to <b>${esc(groupName(st.sels[st.addTo].sel))}</b>. <button data-doneadd>Done</button></span>`:""):"")+kh+th;
