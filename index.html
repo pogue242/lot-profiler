@@ -36,14 +36,15 @@
     <div id="map"></div>
     <div id="tools" role="toolbar" aria-label="Selection tools">
       <button data-mode="view" class="on ptr" title="View a lot's information without changing your selections (V)" aria-label="View lot information"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 1.5v11.2l3-2.9 2 4.7 2.1-.9-2-4.6h4.2z" fill="currentColor" stroke="currentColor" stroke-width=".6" stroke-linejoin="round"/></svg></button>
-      <button data-mode="lot" title="Select a lot; shift-click to add more (L)">Lot</button>
-      <button data-mode="block" title="Select a tax block; shift-click to add more (B)">Block</button>
+      <button data-mode="lot" title="Select a lot; Ctrl-click (⌘ on a Mac) to add more (L)">Lot</button>
+      <button data-mode="block" title="Select a tax block; Ctrl-click (⌘ on a Mac) to add more (B)">Block</button>
       <button data-mode="area" title="Select a Neighborhood Tabulation Area (N)">NTAs</button>
       <button data-mode="tract" title="Select a 2020 census tract (T)">Tracts</button>
       <button data-mode="poly" title="Draw a boundary (D)">Draw</button>
       <button data-mode="radius" title="Radius around a point, entrance or station (R)">Radius</button>
       <button id="clipBtn" class="caret" aria-haspopup="true" aria-expanded="false" title="Lot inclusion rule for radius, walkshed and drawn selections">▾</button>
       <button id="addBtn" class="addb" aria-pressed="false" title="Keep earlier selections so you can compare several (+). Shift-click does the same once.">＋ Add</button>
+      <select id="tapMode" class="tapm" aria-label="What a tap on the map does"><option value="">Tap: select</option><option value="merge">Tap: merge</option><option value="out">Tap: leave out</option></select>
     </div>
     <div id="clipMenu" role="menu" hidden></div>
     <div id="mapBtns">
@@ -175,8 +176,8 @@
         <div class="gfig" aria-hidden="true"><span class="gt on">➤</span><span class="gt">Lot</span><span class="gt">Block</span><span class="gt">NTAs</span><span class="gt">Tracts</span></div></li>
       <li data-gfocus="#tools [data-mode=radius]"><b>Draw, a radius, or measure.</b> <b>Draw</b> traces a boundary (click corners, then the first corner or Enter). <b>Radius</b> measures from a point, an entrance or a station; clicks snap to stations. The <b>▾</b> sets which lots count. <b>Measure</b> (bottom right of the map) gives a distance or an area (double-click or Enter to finish).
         <div class="gfig" aria-hidden="true"><svg viewBox="0 0 120 44" width="120" height="44"><circle cx="40" cy="22" r="18" fill="rgba(27,98,165,.12)" stroke="#1B62A5" stroke-width="2"/><circle cx="40" cy="22" r="3" fill="#fff" stroke="#1B62A5" stroke-width="2"/><path d="M78 8 L112 12 L106 38 L74 32 Z" fill="rgba(27,98,165,.12)" stroke="#1B62A5" stroke-width="2"/></svg></div></li>
-      <li data-gfocus="#addBtn"><b>Compare.</b> Turn on <b>＋ Add</b> (or hold Shift) to keep earlier selections, then switch between <b>Combined</b>, <b>Side by side</b> and each selection. <b>Merge…</b> joins circles, walksheds or drawn areas into one area; <b>Split</b> separates them again.</li>
-      <li data-gfocus="#profile"><b>Read the profile.</b> Land use, housing by units per building, zoning capacity, building age and zoning districts for whatever is selected. Click a table heading to sort; click a row to leave it out of that chart (the rest recalculate). <b>Ctrl-click</b> (⌘-click on a Mac) a lot on the map to leave it out of the selection, or use <b>Leave out of selection</b> in its record. Click a section's title to fold it, or drag its ⋮⋮ to reorder. <b>Customize charts</b> switches pies and bars, groups units per building and leaves land uses out of every figure.</li>
+      <li data-gfocus="#addBtn"><b>Compare.</b> Turn on <b>＋ Add</b> (or hold Shift) to keep earlier selections, then switch between <b>Combined</b>, <b>Side by side</b> and each selection. <b>Merge…</b> joins circles, walksheds or drawn areas into one area; <b>Split</b> separates them again. While clicking: <b>Shift</b> adds a selection, <b>Ctrl</b> (⌘ on a Mac) merges into the current one, and <b>Alt</b> (Option) leaves a lot out. On a phone, use the <b>Tap</b> menu next to ＋ Add.</li>
+      <li data-gfocus="#profile"><b>Read the profile.</b> Land use, housing by units per building, zoning capacity, building age and zoning districts for whatever is selected. Click a table heading to sort; click a row to leave it out of that chart (the rest recalculate). <b>Alt-click</b> (Option-click on a Mac) a lot on the map to leave it out of the selection, or use <b>Leave out of selection</b> in its record. Click a section's title to fold it, or drag its ⋮⋮ to reorder. <b>Customize charts</b> switches pies and bars, groups units per building and leaves land uses out of every figure.</li>
       <li data-gfocus="#legend"><b>Change the map.</b> The <b>Map layers</b> sidebar colors lots by land use, units, year built or FAR, with a choice of color schemes (click a legend square to pick your own color). <b>Lots appear from zoom</b> sets where lots replace tax blocks, and <b>Blocks show</b> how each block sums up its lots. <b>Lots / Zoning</b> at the top switches to ZoLa-style zoning districts and supporting zoning layers (MIH, transit zones, FRESH, E-designations…). Subway, PATH, LIRR and Metro-North are there too; the ‹ hides the sidebar.</li>
       <li data-gfocus="#actions"><b>Share or save.</b> <b>Copy link</b> saves everything on screen in the address. <b>Save map image</b> (bottom right of the map) saves the map with its legend, and each section's <b>PNG</b> saves a chart. Ctrl+Z undoes.</li>
     </ol>
@@ -197,6 +198,7 @@
     <div class="dlgh"><h2 id="expH">Save image</h2><button class="hx" data-expclose aria-label="Close">×</button></div>
     <div class="dlgprev"><canvas id="expPrev"></canvas></div>
     <label class="dlgrow"><span>Title</span><input id="expTitle" type="text" spellcheck="false"></label>
+    <label class="dlgrow"><span>Subtitle</span><input id="expSub" type="text" spellcheck="false" placeholder="None"></label>
     <div class="dlgrow"><span>Size</span><div class="seg" id="expSize"><button data-s="1">Screen</button><button data-s="2">2×</button><button data-s="4">Print 4×</button></div><small id="expPx"></small></div>
     <div class="checks sw" id="expInc"><label><input type="checkbox" data-inc="legend" checked> Legend</label><label><input type="checkbox" data-inc="scalebar" checked> Scale bar</label><label><input type="checkbox" data-inc="north" checked> North arrow</label><label><input type="checkbox" data-inc="sources" checked> Sources</label></div>
     <div class="dlgact"><button data-expclose>Cancel</button><button id="expGo" class="primary">Download PNG</button></div>

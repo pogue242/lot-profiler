@@ -79,8 +79,8 @@ const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").repl
 const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="background:${MTA[r]||"#808183"}">${esc(r)}</span>`;
 
 const st = {
-  releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, addTo:null, combine:null, prevSel:null, pending:null,
-  mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:0, clip:"touch", base:null, curIdx:null,
+  releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
+  mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
   opts:{style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
         order:["lu","ub","fl","fc","age","zone","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
@@ -570,8 +570,8 @@ function selTitle(P, sel, count){
     return [a?a.name:sel.code,(sel.kind==="nta"?"Neighborhood tabulation area":"2020 census tract")+`, ${fmt(count)} lots`]; }
   if (sel.type==="lots"){ if (sel.bbls.length===1){ const i=P.bblIdx.get(sel.bbls[0]), p=bblParts(sel.bbls[0]);
       return [i!=null&&addrOf(P,i)?addrOf(P,i):`BBL ${sel.bbls[0]}`, i!=null?`${P.dict.lu[P.lu[i]]}${P.dict.zone[P.zone[i]]?`  ·  ${P.dict.zone[P.zone[i]]}`:""}`:`${BORO[p.boro]}, block ${p.block}, lot ${p.lot}`]; }
-    return [`${fmt(count)} selected lots`, "Shift-click lots to add or remove them"]; }
-  if (sel.type==="blocks") return [sel.keys.length===1?blockName(sel.keys[0]):`${sel.keys.length} tax blocks`, `${fmt(count)} lots`+(sel.keys.length>1?"; shift-click blocks to add or remove":"")];
+    return [`${fmt(count)} selected lots`, `${MOD}-click lots to add or remove them`]; }
+  if (sel.type==="blocks") return [sel.keys.length===1?blockName(sel.keys[0]):`${sel.keys.length} tax blocks`, `${fmt(count)} lots`+(sel.keys.length>1?`; ${MOD}-click blocks to add or remove`:"")];
   if (sel.type==="group") return groupTitle(P,sel,count);
   const ph=CLIP_PHRASE[clipOf(sel)];
   if (sel.type==="walk"){ const s=st.T&&st.T.byId.get(sel.sid), ne=st.T?st.T.entrances.filter(x=>x.sid===sel.sid).length:0;
@@ -1597,12 +1597,18 @@ function entrancePopup(k, lngLat){
 
 let drawPts=[], radiusC=null, hov=null, rafQ=false, lastEv=null, popup=null;
 const clipSelect=(v,mixed)=>`<select data-clip title="${esc(mixed?"":CLIP_DESC[v])}">${mixed?`<option value="" selected>Mixed</option>`:""}${Object.entries(CLIP_NAME).map(([k,t])=>`<option value="${k}" title="${esc(CLIP_DESC[k])}"${k===v&&!mixed?" selected":""}>${t}</option>`).join("")}</select>`;
+const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl", ALT=MAC?"Option":"Alt";
 const HINTS={
-  lot:"Click a lot to open its record. Shift-click to add or remove lots.",
-  block:"Click a tax block to select it. Shift-click to add or remove blocks.",
+  lot:"Click a lot to open its record.",
+  block:"Click a tax block to select it.",
   poly:"Click to add corners. Click the first corner or press Enter to finish. Esc cancels.",
   measure:"Click or tap to add points, then Done (or double-click / Enter).",
   radius:"Click the center, move out, then click again. Clicks snap to entrances and stations; with a fixed radius and Add on, click station after station. Radius:"};
+const TAP_TEXT={merge:"Taps merge into the current selection.",out:"Taps leave a lot out of the selection."};
+const touchUI=()=>matchMedia("(hover:none)").matches;
+function keysHint(m){ if (!["lot","block","area","tract","poly","radius"].includes(m)||touchUI()) return "";
+  const k=[["Shift","add selection"],[MOD,"merge"],...(m==="poly"||m==="radius"?[]:[[ALT,"leave a lot out"]])];
+  return `<span class="keys">${m==="poly"?"While finishing: ":""}${k.map(([a,b])=>`<kbd>${a}</kbd> ${b}`).join(" · ")}</span>`; }
 const meas={kind:"line",pts:[],done:false};
 const geoDist=(a,b)=>{ const m=(a[1]+b[1])/2; return Math.hypot((a[0]-b[0])*eLng(m),(a[1]-b[1])*eLat(m)); };
 const fmtLen=m=>{ const ft=m*3.28084; return ft<2640?`${fmt(ft)} ft`:`${(ft/5280).toFixed(2)} mi (${fmt(ft)} ft)`; };
@@ -1625,11 +1631,12 @@ function setMode(m){
   if (m==="measure"&&st.mode!=="measure"&&!meas.done){ meas.pts=[]; if (map&&map.getSource("measure")) map.getSource("measure").setData(EMPTY); }
   st.mode=m; drawPts=[]; radiusC=null; if (map.getSource("draw")) map.getSource("draw").setData(EMPTY);
   $$("#tools button,#measBtn").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
-  const h=$("#hint"); h.hidden=!HINTS[m];
-  h.innerHTML=HINTS[m]?esc(HINTS[m])+(m==="radius"?[["¼ mi",402.3],["½ mi",804.7],["1 mi",1609.3],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
+  const h=$("#hint"), kh=keysHint(m), th=st.tapMode&&m!=="view"&&m!=="measure"?`<span class="cliphint">${TAP_TEXT[st.tapMode]}</span>`:""; h.hidden=!HINTS[m]&&!kh&&!th;
+  const tb=$("#tools"); h.style.top=matchMedia("(max-width:820px)").matches?(tb.offsetTop+tb.offsetHeight+6)+"px":"";
+  h.innerHTML=(HINTS[m]?esc(HINTS[m])+(m==="radius"?[["¼ mi",402.3],["½ mi",804.7],["1 mi",1609.3],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
     +(m==="measure"?` <button data-mk="line" class="${meas.kind==="line"?"on":""}">Distance</button><button data-mk="area" class="${meas.kind==="area"?"on":""}">Area</button><button data-mdone>Done</button><button data-mclear>Clear</button> <b id="measOut">${measText()}</b>`:"")
     +(m==="radius"||m==="poly"?` <span class="cliphint">Lot inclusion: <b>${CLIP_NAME[st.clip]}</b> (change with ▾)</span>`:"")
-    +(st.addTo!=null&&st.sels[st.addTo]?` <span class="cliphint">Adding to <b>${esc(groupName(st.sels[st.addTo].sel))}</b>. <button data-doneadd>Done</button></span>`:""):"";
+    +(st.addTo!=null&&st.sels[st.addTo]?` <span class="cliphint">Adding to <b>${esc(groupName(st.sels[st.addTo].sel))}</b>. <button data-doneadd>Done</button></span>`:""):"")+kh+th;
   map.getCanvas().style.cursor=m==="poly"||m==="radius"||m==="measure"?"crosshair":"";
   if (m==="poly"||m==="measure") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
   clearHover(); $("#maptip").hidden=true; applyMapOpts();
@@ -1671,7 +1678,7 @@ function wireMap(){
   map.on("mousemove",e=>{ lastEv=e; if(rafQ) return; rafQ=true; requestAnimationFrame(()=>{ rafQ=false; onMove(lastEv); }); });
   map.on("mouseout",()=>{ $("#maptip").hidden=true; clearHover(); });
   map.on("click",onClick);
-  map.on("dblclick",e=>{ if(st.mode==="poly"){ e.preventDefault(); finishPoly(e.originalEvent.shiftKey); }
+  map.on("dblclick",e=>{ if(st.mode==="poly"){ e.preventDefault(); finishPoly(clickHow(e.originalEvent)); }
     else if (st.mode==="measure"){ e.preventDefault(); while (meas.pts.length>1&&geoDist(meas.pts[meas.pts.length-1],meas.pts[meas.pts.length-2])<0.5) meas.pts.pop(); meas.done=true; drawMeas(); } });
 }
 function subAt(point){ const L=["sub-st","sub-ost","sub-ent"].filter(l=>map.getLayer(l)&&map.getLayoutProperty(l,"visibility")!=="none");
@@ -1785,20 +1792,37 @@ function zoneRecord(z){
 }
 const P_blockLots=j=>Array.from(st.P.blkLots.subarray(st.P.blkStart[j],st.P.blkStart[j+1]));
 function toggleIn(arr,v){ const s=new Set(arr); s.has(v)?s.delete(v):s.add(v); return [...s]; }
+const clickHow=oe=>oe.altKey?"out":(oe.ctrlKey||oe.metaKey)?"merge":oe.shiftKey?"new":st.tapMode||null;
+function applyHow(sel,how,fit){
+  if (how==="merge"&&st.sels.length) return mergeInto(sel);
+  return select(sel,fit,{map:true,add:how==="new"}); }
+function mergeInto(sel){
+  const k=curIndex(), cur=st.sels[k].sel, list=t=>t==="lots"?"bbls":t==="blocks"?"keys":null;
+  if (cur.type===sel.type&&list(sel.type)){ const f=list(sel.type), v=toggleIn(cur[f],sel[f][0]); return v.length?select({...cur,[f]:v},false,{edit:true}):removeSel(k); }
+  const parts=cur.type==="group"?[...cur.parts]:[cur]; let changed=false;
+  for (const s of sel.type==="group"?sel.parts:[sel]){
+    const f=list(s.type), j=f?parts.findIndex(p=>p.type===s.type):-1;
+    if (j>=0){ const v=toggleIn(parts[j][f],s[f][0]); if (v.length) parts[j]={...parts[j],[f]:v}; else parts.splice(j,1); changed=true; continue; }
+    const d=parts.findIndex(p=>JSON.stringify(p)===JSON.stringify(s)); if (d>=0){ parts.splice(d,1); changed=true; continue; }
+    if (s.type==="lots"&&selIndices(st.P,cur).includes(st.P.bblIdx.get(s.bbls[0]))){ toast(`That lot is already in the selection. ${ALT}-click it to leave it out.`); continue; }
+    parts.push(s); changed=true; }
+  if (!changed) return;
+  if (!parts.length) return removeSel(k);
+  select(parts.length===1?parts[0]:{...(cur.type==="group"?cur:{}),type:"group",parts},false,{edit:true}); }
 function onClick(e){
   const p=[e.lngLat.lng,e.lngLat.lat];
   if (st.mode==="measure"){ if (meas.done){ meas.pts=[]; meas.done=false; } meas.pts.push(p); return drawMeas(); }
   const oe=e.originalEvent||{};
-  if ((oe.ctrlKey||oe.metaKey)&&st.sels.length&&st.mode!=="poly"&&st.mode!=="radius"&&map.getZoom()>=lotZ()){ const f=map.queryRenderedFeatures(e.point,{layers:["lots"]}); if (f.length) return toggleExclude(Math.round(st.P.bbl[f[0].id])); }
-  if (st.mode==="poly"){ if (drawPts.length>2){ const a=map.project(drawPts[0]); if(Math.hypot(a.x-e.point.x,a.y-e.point.y)<12) return finishPoly(e.originalEvent.shiftKey); }
+  const how=clickHow(oe);
+  if (how==="out"&&st.sels.length&&st.mode!=="poly"&&st.mode!=="radius"&&map.getZoom()>=lotZ()){ const f=map.queryRenderedFeatures(e.point,{layers:["lots"]}); if (f.length) return toggleExclude(Math.round(st.P.bbl[f[0].id])); }
+  if (st.mode==="poly"){ if (drawPts.length>2){ const a=map.project(drawPts[0]); if(Math.hypot(a.x-e.point.x,a.y-e.point.y)<12) return finishPoly(how); }
     drawPts.push(p); map.getSource("draw").setData(drawFC()); return; }
 
-  const shift=e.originalEvent&&e.originalEvent.shiftKey;
   if (st.mode==="radius"){ const sn=radiusC?null:snap(e.point), c=sn?sn.c:p;
-    if (st.radiusPreset) return finish({type:"radius",c,m:st.radiusPreset,label:sn?`Within ${miles(st.radiusPreset)} of ${sn.label}`:undefined,clip:st.clip},shift);
+    if (st.radiusPreset) return finish({type:"radius",c,m:st.radiusPreset,label:sn?`Within ${miles(st.radiusPreset)} of ${sn.label}`:undefined,clip:st.clip},how);
     if (!radiusC){ radiusC=c; radiusC.label=sn&&sn.label; return; }
     const m=distM(radiusC,p); if (m<20) return;
-    return finish({type:"radius",c:[radiusC[0],radiusC[1]],m:Math.round(m),label:radiusC.label?`Within ${miles(m)} of ${radiusC.label}`:undefined,clip:st.clip},shift); }
+    return finish({type:"radius",c:[radiusC[0],radiusC[1]],m:Math.round(m),label:radiusC.label?`Within ${miles(m)} of ${radiusC.label}`:undefined,clip:st.clip},how); }
   const sf=subAt(e.point);
   if (sf.length){ const f=sf[0]; return f.layer.id==="sub-st"?stationPopup(f.properties.k):f.layer.id==="sub-ost"?otherPopup(f.properties.k):entrancePopup(f.properties.k); }
   if (st.mode==="view"&&!st.map.fill){ const items=zoneItems(e.point); if (items.length){ const f=map.getZoom()>=lotZ()?map.queryRenderedFeatures(e.point,{layers:["lots"]}):[], bbl=f.length?Math.round(st.P.bbl[f[0].id]):null;
@@ -1809,21 +1833,18 @@ function onClick(e){
     if (bx) map.fitBounds([[bx[0],bx[1]],[bx[2],bx[3]]],{padding:60,duration:600,minZoom:lotZ()+0.6,maxZoom:18}); return; }
   if (st.mode==="view"){ const f=map.queryRenderedFeatures(e.point,{layers:["lots"]}); if (f.length) peekLot(Math.round(st.P.bbl[f[0].id])); return; }
   if (st.mode==="lot"||st.mode==="block"){
-    const cur=st.sel;
     if (st.mode==="lot"){ const f=map.queryRenderedFeatures(e.point,{layers:["lots"]}); if (!f.length) return; const bbl=Math.round(st.P.bbl[f[0].id]);
-      if (shift && cur && cur.type==="lots"){ const b=toggleIn(cur.bbls,bbl); return b.length?select({type:"lots",bbls:b},false,{edit:true}):removeSel(curIndex()); }
-      return select({type:"lots",bbls:[bbl]},false,{map:true}); }
+      return applyHow({type:"lots",bbls:[bbl]},how); }
     const f=map.queryRenderedFeatures(e.point,{layers:["blocks-fill"]}); if (!f.length) return;
     const key=st.P.blocks[f[0].id]&&st.P.blocks[f[0].id].key; if (key==null) return;
-    if (shift && cur && cur.type==="blocks"){ const k=toggleIn(cur.keys,key); return k.length?select({type:"blocks",keys:k},false,{edit:true}):removeSel(curIndex()); }
-    return select({type:"blocks",keys:[key]},false,{map:true}); }
+    return applyHow({type:"blocks",keys:[key]},how); }
   const f=map.queryRenderedFeatures(e.point,{layers:[st.mode==="tract"?"tract-fill":"nta-fill"]});
-  if (f.length){ const a=st.P.areas[f[0].id]; select({type:"area",kind:a.kind,code:a.code},false,{map:true,add:shift}); }
+  if (f.length){ const a=st.P.areas[f[0].id]; applyHow({type:"area",kind:a.kind,code:a.code},how); }
 }
-function finishPoly(shift){ if (drawPts.length<3){ setMode("view"); return; }
-  finish({type:"poly",ring:[...drawPts,drawPts[0]].map(([x,y])=>[+x.toFixed(6),+y.toFixed(6)]),clip:st.clip},shift); }
-function finish(sel,shift){ const stay=st.mode==="radius"&&(st.addMode||shift||st.addTo!=null)&&st.radiusPreset;
-  if (!stay && (st.mode==="radius"||st.mode==="poly")) setMode("view"); select(sel,false,{map:true,add:shift}); }
+function finishPoly(how){ if (drawPts.length<3){ setMode("view"); return; }
+  finish({type:"poly",ring:[...drawPts,drawPts[0]].map(([x,y])=>[+x.toFixed(6),+y.toFixed(6)]),clip:st.clip},how); }
+function finish(sel,how){ const stay=st.mode==="radius"&&(st.addMode||how==="new"||how==="merge"||st.addTo!=null)&&st.radiusPreset;
+  if (!stay && (st.mode==="radius"||st.mode==="poly")) setMode("view"); applyHow(sel,how); }
 
 function nextColor(){ const used=new Set(st.sels.map(e=>e.color)); return SEL_COLORS.find(c=>!used.has(c))||SEL_COLORS[st.sels.length%SEL_COLORS.length]; }
 const curIndex=()=>st.sels.length===1?0:typeof st.view==="number"?st.view:st.sels.length-1;
@@ -2083,7 +2104,8 @@ const slug=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const plain=s=>String(s).replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
 const XF=(w,s)=>`${w} ${s}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
 const XC={ink:"#14263B",ink2:"#5B6B7C",ink3:"#8794A1",rule:"#E3E7EB"};
-const exp={kind:"map",key:null,scale:2,title:"",inc:{legend:true,scalebar:true,north:true,sources:true},shot:null};
+const WM="Lot Profiler · github.com/pogue242/lot-profiler", MX=document.createElement("canvas").getContext("2d");
+const exp={kind:"map",key:null,scale:2,title:"",sub:"",inc:{legend:true,scalebar:true,north:true,sources:true},shot:null};
 function grabMap(){ return new Promise(res=>{ map.once("render",()=>{ const c=map.getCanvas(), o=document.createElement("canvas"); o.width=c.width; o.height=c.height; o.getContext("2d").drawImage(c,0,0); res(o); }); map.triggerRepaint(); }); }
 async function hiResMap(k){
   const dpr=devicePixelRatio||1; if (k<=dpr||typeof map.setPixelRatio!=="function") return exp.shot;
@@ -2096,12 +2118,13 @@ function niceScale(mpp, px){ const ft=mpp*3.28084*px, steps=[50,100,200,250,500,
   const f=steps.filter(s=>s<=ft).pop()||steps[0]; return {px:f/(mpp*3.28084), label:f>=5280/2?`${f/5280} mi`:`${fmt(f)} ft`}; }
 function composeMap(shot,k){
   const mc=map.getCanvas(), W=mc.clientWidth, H=mc.clientHeight, v=st.colorBy, L=exp.inc.legend?legendItems():null;
-  const cols=Math.max(1,Math.floor((W-40)/230)), n=L&&L.items?L.items.length:0, legH=!L?0:L.ramp?62:30+Math.ceil(n/cols)*19+8, head=66, foot=exp.inc.sources?28:12;
+  const src=exp.inc.sources?`NYC DCP MapPLUTO ${st.P.id} · © OpenStreetMap contributors, OpenMapTiles${st.map.basemap==="sat"?" · Imagery © Esri":""}`:"";
+  MX.font=XF(400,10.5); const two=src&&MX.measureText(src).width+MX.measureText(WM).width+56>W;
+  const cols=Math.max(1,Math.floor((W-40)/230)), n=L&&L.items?L.items.length:0, legH=!L?0:L.ramp?62:30+Math.ceil(n/cols)*19+8, head=exp.sub?66:50, foot=two?42:28;
   const cv=document.createElement("canvas"); cv.width=Math.round(W*k); cv.height=Math.round((head+H+legH+foot)*k); const g=cv.getContext("2d"); g.scale(k,k);
   g.fillStyle="#fff"; g.fillRect(0,0,W,head+H+legH+foot);
   g.fillStyle=XC.ink; g.font=XF(600,20); g.fillText(exp.title||"Lot Profiler",20,32);
-  const sub=st.map.fill?(VIEW_LABEL[v]||v):"Zoning districts";
-  g.fillStyle=XC.ink2; g.font=XF(400,12.5); g.fillText(`${sub}  ·  MapPLUTO ${st.P.id}`,20,52);
+  if (exp.sub){ g.fillStyle=XC.ink2; g.font=XF(400,12.5); g.fillText(exp.sub,20,52); }
   g.drawImage(shot,0,head,W,H); g.strokeStyle=XC.rule; g.lineWidth=1; g.strokeRect(0.5,head+0.5,W-1,H-1);
   if (exp.inc.scalebar){ const c=map.getCenter(), mpp=40075016.686*Math.cos(c.lat*Math.PI/180)/(512*Math.pow(2,map.getZoom())), s=niceScale(mpp,140), x=16, y=head+H-18;
     g.fillStyle="rgba(255,255,255,.88)"; g.fillRect(x-6,y-18,s.px+60,28); g.fillStyle=XC.ink; g.fillRect(x,y,s.px,3); g.fillRect(x,y-5,1.5,8); g.fillRect(x+s.px-1.5,y-5,1.5,8);
@@ -2116,18 +2139,20 @@ function composeMap(shot,k){
       L.labels.forEach((t,i)=>{ g.textAlign=i===0?"left":i===L.labels.length-1?"right":"center"; g.fillText(t,20+gw*i/Math.max(1,L.labels.length-1),y+17); }); g.textAlign="left"; y+=38; }
     else { L.items.forEach(([c,t],i)=>{ const cx=20+(i%cols)*230, cy=y+Math.floor(i/cols)*19; g.fillStyle=c; g.fillRect(cx,cy-9,11,11); g.strokeStyle="rgba(0,0,0,.12)"; g.strokeRect(cx+.5,cy-8.5,10,10);
         g.fillStyle=XC.ink; g.font=XF(400,12); g.fillText(t.length>34?t.slice(0,33)+"…":t,cx+18,cy); }); y+=Math.ceil(n/cols)*19+8; } }
-  if (exp.inc.sources){ g.fillStyle=XC.ink3; g.font=XF(400,10.5); g.fillText(`Lot Profiler · NYC DCP MapPLUTO ${st.P.id} · © OpenStreetMap contributors, OpenMapTiles${st.map.basemap==="sat"?" · Imagery © Esri":""}`,20,head+H+legH+18); }
+  g.fillStyle=XC.ink3; g.font=XF(400,10.5); const fy=head+H+legH+18;
+  if (src) g.fillText(src,20,fy);
+  g.textAlign=two?"left":"right"; g.fillText(WM,two?20:W-20,two?fy+14:fy); g.textAlign="left";
   return cv; }
 function composeSection(key,k){
   const sp=st.specs[key], pies=st.opts.style==="pies"&&sp.charts, rows=(sp.rows||[]).filter(r=>!r.hid), kv=sp.kv||[], mr=(sp.mrows||[]).filter(r=>!r.hid), mc=sp.mcols||[];
   const W=Math.max(680,mr.length?250+mc.length*112:0), chartH=sp.charts?(pies?176:sp.charts.length*30+10):sp.hist?132:0;
-  const H=74+chartH+(rows.length?(rows.length+1)*24+14:0)+(mr.length?(mr.length+1)*26+14:0)+kv.length*24+(exp.inc.sources?40:16);
+  const top=exp.sub?0:-16, H=74+top+chartH+(rows.length?(rows.length+1)*24+14:0)+(mr.length?(mr.length+1)*26+14:0)+kv.length*24+40;
   const cv=document.createElement("canvas"); cv.width=Math.round(W*k); cv.height=Math.round(H*k); const g=cv.getContext("2d"); g.scale(k,k);
   g.fillStyle="#fff"; g.fillRect(0,0,W,H);
   g.fillStyle=XC.ink; g.font=XF(600,19); g.fillText(exp.title||sp.title,24,34);
-  g.fillStyle=XC.ink2; g.font=XF(400,12.5); g.fillText(`${$("#areaName").textContent}  ·  MapPLUTO ${st.P.id}`,24,54);
-  g.fillStyle=XC.rule; g.fillRect(24,64,W-48,1);
-  let y=82; const rule=yy=>{ g.fillStyle=XC.rule; g.fillRect(24,yy,W-48,1); };
+  if (exp.sub){ g.fillStyle=XC.ink2; g.font=XF(400,12.5); g.fillText(exp.sub,24,54); }
+  g.fillStyle=XC.rule; g.fillRect(24,64+top,W-48,1);
+  let y=82+top; const rule=yy=>{ g.fillStyle=XC.rule; g.fillRect(24,yy,W-48,1); };
   if (sp.charts&&pies){ const n=sp.charts.length, R=56;
     sp.charts.forEach((ch,ci)=>{ const cx=24+(W-48)/n*(ci+.5), cy=y+R+6; let a=-Math.PI/2;
       ch.segs.filter(s=>s.pct>0).forEach(s=>{ const b=a+s.pct/100*2*Math.PI; g.beginPath(); g.moveTo(cx,cy); g.arc(cx,cy,R,a,b); g.closePath(); g.fillStyle=s.c; g.fill(); a=b; });
@@ -2148,8 +2173,22 @@ function composeSection(key,k){
       r.slice(1).forEach((v,ci)=>{ g.textAlign="right"; g.fillText(plain(v),274+cw*(ci+1)-4,y); g.textAlign="left"; }); rule(y+8); }); y+=14; }
   kv.forEach(([a,b])=>{ y+=24; g.fillStyle=XC.ink2; g.font=XF(400,13); g.fillText(plain(a),24,y);
     g.fillStyle=XC.ink; g.font=XF(600,13); g.textAlign="right"; g.fillText(/data-showowner/.test(b)?"Not shown":plain(b),W-24,y); g.textAlign="left"; rule(y+8); });
-  if (exp.inc.sources){ g.fillStyle=XC.ink3; g.font=XF(400,10.5); g.fillText(`Lot Profiler · NYC DCP MapPLUTO ${st.P.id}`,24,H-14); }
+  g.fillStyle=XC.ink3; g.font=XF(400,10.5); if (exp.inc.sources) g.fillText(`NYC DCP MapPLUTO ${st.P.id}`,24,H-14);
+  g.textAlign="right"; g.fillText(WM,W-24,H-14); g.textAlign="left";
   return cv; }
+const CRC32=(()=>{ const t=new Uint32Array(256); for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+function crc32(b){ let c=0xFFFFFFFF; for (const x of b) c=CRC32[(c^x)&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function crc16(b){ let c=0xFFFF; for (const x of b){ c^=x<<8; for (let k=0;k<8;k++) c=c&0x8000?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF; } return c; }
+function markPixels(cv,text){
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height, im=g.getImageData(0,0,W,H), d=im.data, p=[...new TextEncoder().encode(text).slice(0,255)];
+  const body=[p.length,...p], c=crc16(body), bits=[0x4C,0x50,...body,c>>8,c&255].flatMap(b=>[7,6,5,4,3,2,1,0].map(k=>(b>>k)&1)), n=bits.length;
+  for (let y=0;y<H;y++){ const o=y*W*4+2; for (let x=0;x<W;x++){ const i=o+x*4; d[i]=(d[i]&254)|bits[x%n]; } }
+  g.putImageData(im,0,0); }
+async function tagPng(blob,fields){
+  const b=new Uint8Array(await blob.arrayBuffer()), enc=new TextEncoder(), parts=[b.subarray(0,33)];
+  for (const [k,v] of fields){ const data=new Uint8Array([...enc.encode("iTXt"),...enc.encode(k),0,0,0,0,0,...enc.encode(v)]), len=data.length-4, out=new Uint8Array(data.length+8), dv=new DataView(out.buffer);
+    dv.setUint32(0,len); out.set(data,4); dv.setUint32(out.length-4,crc32(data)); parts.push(out); }
+  parts.push(b.subarray(33)); return new Blob(parts,{type:"image/png"}); }
 function expCanvas(k){ return exp.kind==="map"?composeMap(exp.shot,k):composeSection(exp.key,k); }
 function drawExpPreview(){
   const cv=expCanvas(1), p=$("#expPrev"), box=p.parentElement, s=Math.min(1,(box.clientWidth-2)/cv.width,360/cv.height);
@@ -2159,20 +2198,25 @@ function drawExpPreview(){
   $$("#expSize button").forEach(b=>b.classList.toggle("on",+b.dataset.s===exp.scale)); $("#expInc").hidden=exp.kind!=="map"; }
 async function openExport(kind,key){
   exp.kind=kind; exp.key=key; exp.title=kind==="map"?(st.sel||st.peek!=null?$("#areaName").textContent:"Lot Profiler"):st.specs[key].title;
+  exp.sub=`${kind==="map"?(st.map.fill?(VIEW_LABEL[st.colorBy]||st.colorBy):"Zoning districts"):$("#areaName").textContent}  ·  MapPLUTO ${st.P.id}`;
   if (kind==="map"){ $("#mapPng").disabled=true; try{ exp.shot=await grabMap(); }finally{ $("#mapPng").disabled=false; } }
-  $("#expTitle").value=exp.title; $("#expDlg").hidden=false;
+  $("#expTitle").value=exp.title; $("#expSub").value=exp.sub; $("#expDlg").hidden=false;
   try{ drawExpPreview(); }catch(err){ console.warn("image preview:",err); $("#expDlg").hidden=true; toast(st.map.basemap==="sat"?"The satellite imagery can't be saved in an image. Switch the basemap to Map and try again.":"The image couldn't be made."); return; }
   $("#expTitle").focus(); }
 async function saveExport(){
   const btn=$("#expGo"); btn.disabled=true;
   try{ const cv=exp.kind==="map"?composeMap(await hiResMap(exp.scale),exp.scale):composeSection(exp.key,exp.scale);
-    cv.toBlob(b=>{ if (b) download(b,`${slug(exp.title||"lot-profiler")}-${exp.kind==="map"?"map":exp.key}-${st.P.id}.png`); else toast("The image couldn't be saved."); btn.disabled=false; $("#expDlg").hidden=true; }); }
+    const now=new Date(), day=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+    try{ markPixels(cv,`LP|pogue242/lot-profiler|${st.P.id}|${day}`); }catch(err){ console.warn("image mark:",err); }
+    cv.toBlob(async b=>{ if (b){ try{ b=await tagPng(b,[["Software",WM],["Source",`NYC DCP MapPLUTO ${st.P.id}`],["Creation Time",now.toISOString()],["Title",exp.title||""],["Description",exp.sub||""]]); }catch(err){ console.warn("image tags:",err); }
+        download(b,`${slug(exp.title||"lot-profiler")}-${exp.kind==="map"?"map":exp.key}-${st.P.id}.png`); } else toast("The image couldn't be saved."); btn.disabled=false; $("#expDlg").hidden=true; }); }
   catch(err){ console.warn("image:",err); toast("The image couldn't be saved."); btn.disabled=false; } }
 function wireExport(){
   const d=$("#expDlg");
   d.addEventListener("click",e=>{ if (e.target===d||e.target.closest("[data-expclose]")) d.hidden=true;
     const b=e.target.closest("[data-s]"); if (b){ exp.scale=+b.dataset.s; drawExpPreview(); } });
   $("#expTitle").oninput=e=>{ exp.title=e.target.value; drawExpPreview(); };
+  $("#expSub").oninput=e=>{ exp.sub=e.target.value; drawExpPreview(); };
   $("#expInc").onchange=e=>{ const t=e.target.closest("[data-inc]"); if (t){ exp.inc[t.dataset.inc]=t.checked; drawExpPreview(); } };
   $("#expGo").onclick=saveExport;
   addEventListener("keydown",e=>{ if (e.key==="Escape"&&!d.hidden) d.hidden=true; }); }
@@ -2271,8 +2315,9 @@ function wireGuide(){
   let off=false; try{ off=!!localStorage.getItem("lp-welcome-off"); }catch(_){}
   if (!off && !navigator.webdriver) w.hidden=false;
 }
-function toggleAdd(){ st.addMode=!st.addMode; $("#addBtn").classList.toggle("on",st.addMode); $("#addBtn").setAttribute("aria-pressed",st.addMode);
-  if (st.mode==="radius") setMode("radius"); }
+function setTapMode(v){ st.tapMode=v||null; $("#tapMode").value=v||""; if (st.tapMode&&st.addMode) toggleAdd(); else setMode(st.mode); }
+function toggleAdd(){ st.addMode=!st.addMode; if (st.addMode&&st.tapMode) setTapMode(null); $("#addBtn").classList.toggle("on",st.addMode); $("#addBtn").setAttribute("aria-pressed",st.addMode);
+  setMode(st.mode); }
 
 async function boot(){
   try{
@@ -2310,12 +2355,12 @@ async function boot(){
     $("#clipRow").onchange=e=>{ if (e.target.matches("[data-clip]") && e.target.value) applyClip(e.target.value); };
     $("#track").onclick=e=>{ const b=e.target.closest("[data-rel]"); if(b) switchRelease(b.dataset.rel); };
     $("#cmp").onchange=e=>setCompare(e.target.value);
-    document.addEventListener("click",e=>{ const w=e.target.closest("[data-walk]"), en=e.target.closest("[data-ent]"), rt=e.target.closest("[data-route]"), o={map:true,add:e.shiftKey};
-      if (w) select({type:"walk",sid:w.dataset.walk,m:+w.dataset.m,clip:st.clip},true,o);
+    document.addEventListener("click",e=>{ const w=e.target.closest("[data-walk]"), en=e.target.closest("[data-ent]"), rt=e.target.closest("[data-route]"), how=clickHow(e)==="out"?null:clickHow(e);
+      if (w) applyHow({type:"walk",sid:w.dataset.walk,m:+w.dataset.m,clip:st.clip},how,true);
       const orad=e.target.closest("[data-orad]"); if (orad){ const x=st.T.other[+orad.dataset.orad], m=+orad.dataset.m;
-        select({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of ${x.name} (${netLabel(x)})`,clip:st.clip},true,o); }
+        applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of ${x.name} (${netLabel(x)})`,clip:st.clip},how,true); }
       if (en){ const x=st.T.entrances[+en.dataset.ent], s=st.T.byId.get(x.sid), m=+en.dataset.m;
-        select({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of an entrance to ${s.name}`,clip:st.clip},true,o); }
+        applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of an entrance to ${s.name}`,clip:st.clip},how,true); }
       const ort=e.target.closest("[data-oroute]");
       if (rt||ort){ const r=(rt||ort).dataset.route||ort.dataset.oroute, [[x0,y0],[x1,y1]]=st.P.bbox, pad=0.012, inb=s=>s.lng>x0-pad&&s.lng<x1+pad&&s.lat>y0-pad&&s.lat<y1+pad;
         const near=rt?st.T.stations.filter(s=>s.routes.includes(r)&&inb(s)).map(s=>s.id)
@@ -2325,16 +2370,18 @@ async function boot(){
         if (popup) popup.remove();
         if (st.addTo!=null && st.sels[st.addTo]){ pushUndo(); const k=st.addTo, g=st.sels[k]; st.sels[k]={...g,sel:{...g.sel,parts:[...g.sel.parts,...walks]}}; st.view=st.sels.length>1?k:0; drawSelection(); renderProfile(); writeHash(); return; }
         const grp={type:"group",parts:walks};
-        const keep=(st.addMode||e.shiftKey)?st.sels.map(x=>x.sel):[];
+        if (how==="merge"&&st.sels.length) return applyHow(grp,how,true);
+        const keep=(st.addMode||how==="new")?st.sels.map(x=>x.sel):[];
         restore(keep.concat([grp]),keep.length?keep.length:0,true,true); } });
     $("#addBtn").onclick=()=>toggleAdd();
+    $("#tapMode").onchange=e=>setTapMode(e.target.value);
     $("#satBtn").onclick=()=>{ st.map.basemap=st.map.basemap==="sat"?"map":"sat"; applyMapOpts(); };
     $("#basemap").onchange=e=>{ st.map.basemap=e.target.value; applyMapOpts(); };
     addEventListener("keydown",e=>{ if (e.target.matches("input,select,textarea")) return;
       if ((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==="z"||e.key.toLowerCase()==="y")){ e.preventDefault();
         return (e.key.toLowerCase()==="y"||e.shiftKey) ? redo() : undo(); }
       if (e.key==="Escape"){ if(st.mode==="poly"||st.mode==="radius"||st.mode==="measure") setMode("view"); else if(popup) popup.remove(); else if (st.peek!=null) peekLot(null); }
-      else if (e.key==="Enter"&&st.mode==="poly") finishPoly(e.shiftKey);
+      else if (e.key==="Enter"&&st.mode==="poly") finishPoly(clickHow(e));
       else if (e.key==="Enter"&&st.mode==="measure"){ meas.done=true; drawMeas(); }
       else if ((e.key==="["||e.key==="]") && st.sels.length>1){ const seq=["all","cmp",...st.sels.map((_,k)=>k)], at=seq.indexOf(st.view); setView(seq[(at+(e.key==="]"?1:seq.length-1))%seq.length]); }
       else if (e.key==="+"||e.key==="=") toggleAdd();
