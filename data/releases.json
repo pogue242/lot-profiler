@@ -33,14 +33,14 @@
   "dir": "26v2",
   "format": 3,
   "lots": 856687,
-  "bytes": 155882647,
+  "bytes": 155393642,
   "core": 7345474,
   "coverage": "New York City",
   "source": "NYC DCP MapPLUTO 26v2 (MapPLUTO_26v2_clipped), unmodified",
   "transit": "transit_2026-10-19.json",
   "qa": {
    "file": "qa.lpk",
-   "built": "2026-10-19"
+   "built": "2026-10-29"
   }
  }
 ]
