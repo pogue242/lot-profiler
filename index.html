@@ -58,6 +58,7 @@
       <div class="seg lmode" id="layerMode" role="group" aria-label="Map mode"><button data-lm="lots" class="on">Lots</button><button data-lm="zoning">Zoning</button></div>
       <details id="lotOpts" open>
       <summary>Lot colors</summary>
+      <label class="lotsw" title="Turn lot and block colors on or off"><input type="checkbox" id="lotOn" checked><span class="tg" aria-hidden="true"></span>Show lot colors</label>
       <label class="cb">Color lots by
         <select id="colorBy">
           <option value="lu">Land use</option>
@@ -114,6 +115,14 @@
           <label><input type="checkbox" data-sub="platforms" checked> Platforms</label>
           <label title="PATH and New Jersey light rail in their own colors; LIRR and Metro-North in one shared color"><input type="checkbox" data-sub="rail" checked> PATH, NJ light rail, LIRR, Metro-North</label>
         </div>
+        <span class="ol">Buses</span>
+        <div class="checks sw">
+          <label title="Every MTA local, Select Bus and express stop; shows from zoom 12.5"><input type="checkbox" data-bus="stops"> Stops</label>
+          <label title="Route lines in MTA colors"><input type="checkbox" data-bus="routes"> Routes</label>
+        </div>
+        <p id="busStatus" class="lstatus" aria-live="polite"></p>
+        <span class="ol">Proposed lines <small class="demo">demo</small></span>
+        <div id="plines"></div>
         <label class="rrow">Walkshed rings <select id="rings">
           <option value="0">Off</option><option value="402.3">¼ mile</option><option value="804.7">½ mile</option><option value="1609.3">1 mile</option>
         </select></label>

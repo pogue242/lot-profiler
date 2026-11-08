@@ -27,6 +27,7 @@ const SCHEMES = {
   spectral:{name:"Spectral (most contrast)", c:["#5E4FA2","#3288BD","#66C2A5","#ABDDA4","#E6F598","#FEE08B","#FDAE61","#F46D43","#D53E4F"]},
   distinct:{name:"Distinct colors", c:["#4E79A7","#F28E2B","#E15759","#76B7B2","#59A14F","#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC"]}};
 const LU_SCHEMES={standard:[...LU_COLORS], muted:["#F7E08A","#F2A93B","#C4692A","#EC7B62","#C8323B","#9A6FAA","#B8B2CC","#5B93C4","#77B36B","#C9C9C0","#80807A","#DEDBD2"]};
+const UB_MAP=[...UB_RAMP], UB_DIV0=Array(8).fill(true);
 const UB_BASE=[...UB_RAMP], YB_BASE=YB_CLASSES.map(c=>c[3]), FC_BASE=[...FC_COLORS];
 const schemeDefault=v=>v==="lu"?"standard":"spectral";
 const schemeOf=v=>(st.colors.scheme[v]||schemeDefault(v));
@@ -80,13 +81,14 @@ const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="bac
 
 const st = {
   releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
-  mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
-  opts:{style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
+  walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
+  opts:{park:"whole", style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
         order:["lu","ub","fl","fc","age","zone","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
+       colorsOff:false, ubDiv:(()=>{ try{ const d=JSON.parse(localStorage.getItem("lp-ub-div")||"null"); if (Array.isArray(d)&&d.length===8) return d.map(Boolean); }catch(_){} return [...UB_DIV0]; })(),
        hidden:{lu:new Set(),ub:new Set(),fc:new Set(),zn:new Set(),dq:new Set(),fl:new Set()}, range:{...RANGE_DEFAULT}, ramp:"blues",
-       ntaNames:true, sub:{lines:true, rail:true, stations:true, names:false, entrances:true, platforms:true}, rings:0,
+       ntaNames:true, sub:{lines:true, rail:true, stations:true, names:false, entrances:true, platforms:true}, bus:{stops:false, routes:false}, rings:0,
        zon:{zd:false, co:false, sp:false, ss:false, lh:false, labels:true, mih:false, ih:false, tz:false, fr:false, ed:false, ldg:false, cz:false, wap:false, uwa:false, apj:false}},
   specs:{},
 };
@@ -382,6 +384,33 @@ function shareInside(polys, box, test){
 }
 const boxOf=(P,i)=>P.lotBox.subarray(4*i,4*i+4);
 
+const PARK_LU=8;
+const PARK_NAME={whole:"Whole park",part:"Part inside",edge:"Leave out edge parks",out:"Leave out all parks"};
+const PARK_DESC={whole:"Parks count in full, even if only a corner is inside.",part:"Parks count only the share of their area inside the shape.",
+  edge:"Parks that cross the boundary are left out; parks fully inside count.",out:"Every park lot is left out."};
+const parkCache=new Map();
+function shapeParts(sel,sh,rest){ if (sel.type==="group"||sel.type==="multi") sel.parts.forEach(p=>shapeParts(p,sh,rest)); else (isShape(sel)?sh:rest).push(sel); }
+function parkFrac(P, sel, idx){
+  const sh=[], rest=[]; shapeParts(sel,sh,rest); if (!sh.length) return null;
+  if (st.opts.park==="out") return new Map();
+  const key=P.id+"|"+(st.T?st.T.file:"")+"|"+encSel(sel)+"|"+idx.length; let r=parkCache.get(key); if (r) return r;
+  r=new Map(); const tests=sh.map(p=>partTest(P,p)), whole=new Set(), miss=[], [ox,oy]=P.origin;
+  rest.forEach(p=>selIndices(P,p).forEach(i=>whole.add(i)));
+  const inside=(x,y)=>{ const lng=x/KX+ox, lat=y/MLAT+oy; return tests.some(t=>t(lng,lat)); };
+  for (const i of idx){ if (P.lu[i]!==PARK_LU||whole.has(i)) continue;
+    const polys=lotRingsM(P,i); if (!polys){ miss.push(i); continue; } if (!polys.length) continue;
+    let all=true, x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+    for (const poly of polys) for (const [vx,vy] of poly[0]){ if (all&&!inside(vx,vy)) all=false; if(vx<x0)x0=vx; if(vx>x1)x1=vx; if(vy<y0)y0=vy; if(vy>y1)y1=vy; }
+    if (all) continue;
+    const N=32; let lot=0, hit=0;
+    for (let a=0;a<N;a++) for (let b=0;b<N;b++){ const x=x0+(x1-x0)*(a+.5)/N, y=y0+(y1-y0)*(b+.5)/N; if (!inLotM(polys,x,y)) continue; lot++; if (inside(x,y)) hit++; }
+    if (lot&&hit<lot) r.set(i,hit/lot); }
+  if (miss.length){ const job=needLots(P,miss).then(()=>{ parkCache.delete(key); refreshSoon(); }).catch(err=>console.warn("park outlines:",err));
+    pending.add(job); job.finally(()=>pending.delete(job)); return r; }
+  if (parkCache.size>100) parkCache.clear(); parkCache.set(key,r); return r;
+}
+const statOpts=(P,sel,idx)=>st.opts.park==="whole"?st.opts:{...st.opts,parkF:parkFrac(P,sel,idx)};
+
 function lotsInCircles(P, pts, m, mode, miss){
   const out=[], C=pts.map(([x,y])=>toM(P,x,y)), r2=m*m;
   let a=180,b=90,c=-180,d=-90; for (const [x,y] of pts){ if(x<a)a=x; if(x>c)c=x; if(y<b)b=y; if(y>d)d=y; }
@@ -481,6 +510,7 @@ function toggleExclude(bbl){
   drawSelection(); renderProfile(); writeHash(); toast(back?`${addrOf(P,i)||"Lot"} is counted again.`:`${addrOf(P,i)||"Lot"} left out of the selection.`,"Undo",undo); return true;
 }
 function selIdx0(P, sel, preview){
+  if (sel.type==="group"&&sel.minus&&sel.minus.length){ const a=selIdx0(P,{type:"group",parts:sel.parts},preview), b=mergeIdx(sel.minus.map(s=>selIndices(P,s,preview))), bs=new Set(b), o=a.filter(i=>!bs.has(i)); if (a.provisional||b.provisional) o.provisional=true; return o; }
   if (sel.type==="multi"||sel.type==="group"){ const parts=sel.parts.map(s=>selIndices(P,s,preview)), r=mergeIdx(parts);
     if (parts.some(x=>x.provisional)) r.provisional=true; return r; }
   if (!isShape(sel)) return rawIndices(P,sel);
@@ -558,6 +588,7 @@ function groupName(sel){
   return `${n} areas combined`;
 }
 function groupTitle(P, sel, count){
+  if (sel.minus) return [groupName(sel), `${fmt(count)} lots within ${miles(sel.parts[0].m)} of a proposed station and not within ${miles(sel.parts[0].m)} of an existing subway entrance (straight-line)`];
   const cl=clipsIn(sel), ph=cl.length===1?CLIP_PHRASE[cl[0]]:"counted by each part's rule,";
   const kinds=sel.parts.every(p=>p.type==="walk")?"walksheds":sel.parts.every(p=>p.type==="radius")?"circles":"areas";
   return [groupName(sel), `One merged area: ${fmt(count)} lots ${ph} any of its ${sel.parts.length} ${kinds}; lots in overlaps count once`];
@@ -583,6 +614,13 @@ function selTitle(P, sel, count){
 function groupsFrom(div){ const g=[[0]]; for(let i=1;i<9;i++) div[i-1]?g.push([i]):g[g.length-1].push(i); return g; }
 function groupLabel(g){ const lo=UB_RANGE[g[0]][0], hi=UB_RANGE[g[g.length-1]][1];
   return hi==null?`${lo}+ units`:lo===hi?`${lo} unit${lo>1?"s":""}`:`${lo}–${hi} units`; }
+function ubGroups(){ return groupsFrom(st.map.ubDiv); }
+function ubDefault(){ return st.map.ubDiv.every(Boolean); }
+function ubFirst(){ const f=new Int16Array(9); ubGroups().forEach(g=>g.forEach(b=>f[b]=g[0])); return f; }
+function ubIndex(){ const f=new Int16Array(9); ubGroups().forEach((g,k)=>g.forEach(b=>f[b]=k)); return f; }
+function setUbDiv(div){ st.map.ubDiv=div; st.map.hidden.ub.clear();
+  try{ ubDefault()?localStorage.removeItem("lp-ub-div"):localStorage.setItem("lp-ub-div",JSON.stringify(div)); }catch(_){}
+  setColors(C=>{ delete C.custom.ub; }); }
 const groupColors = n => n===1?[UB_RAMP[4]]:Array.from({length:n},(_,i)=>UB_RAMP[Math.round(i*8/(n-1))]);
 function parseGroups(text){
   const toks=text.split(/[,;|·]/).map(t=>t.trim()).filter(Boolean);
@@ -611,13 +649,15 @@ function computeStats(P, idx, o, allLots){
   const S={lots:0,area:0,units:0,resLots:0,groups, luL:new Float64Array(12),luA:new Float64Array(12),luU:new Float64Array(12),
     ubL:new Float64Array(G),ubA:new Float64Array(G),ubU:new Float64Array(G), flL:new Float64Array(9),flA:new Float64Array(9),flU:new Float64Array(9), fcL:new Float64Array(8), zone:new Map(),
     dec:new Float64Array(DECADES.length), ybc:new Float64Array(5), dictZone:P.dict.zone, filtered:0, ids:[],
-    hasFar:!!P.far&&!allLots, ageLots:0, dqLots:0, dqUnits:0};
+    hasFar:!!P.far&&!allLots, ageLots:0, dqLots:0, dqUnits:0, parkOut:0, parkCut:0};
   const hasFar=S.hasFar;
   const areas=[],built=[],years=[]; let sm=0,sd=0,nd=0,over=0,under=0,bfa=0,mfa=0;
   for (const i of idx){
     const lu=P.lu[i]; if (o.luExcl.has(lu)||(o.boroExcl&&o.boroExcl.size&&o.boroExcl.has(Math.floor(P.bbl[i]/1e9)))) continue;
     const dq=P.qa?dqIssues(P,i):[]; if (dq.length){ S.dqLots++; S.dqUnits+=P.units[i]; if (o.dq.mode==="exclude") continue; }
     let a=P.area[i], bfi=P.bfar[i]; const u=P.units[i];
+    if (lu===PARK_LU&&o.parkF){ const f=o.parkF.get(i); if (o.park==="out"||(o.park==="edge"&&f!=null)){ S.parkOut++; continue; }
+      if (o.park==="part"&&f!=null){ if (f<0.005){ S.parkOut++; continue; } S.parkCut+=a*(1-f); a*=f; } }
     S.ids.push(i);
     S.lots++; S.area+=a; S.units+=u; areas.push(a);
     S.luL[lu]++; S.luA[lu]+=a; S.luU[lu]+=u;
@@ -846,12 +886,13 @@ function lotSpecs(i){
       L(`https://streets.planning.nyc.gov/about?lat=${lat}&lng=${lng}&zoom=17`,"City Map (Streets)")]],
     ["Neighborhood",[...(cdn&&!isJIA(cdn)?[L(`https://popfactfinder.planning.nyc.gov/explorer/districts/${cdn}`,"Population FactFinder"),
       L(`https://communityprofiles.planning.nyc.gov/${(BORO[Math.floor(cdn/100)]||"").toLowerCase().replace(/ /g,"-")}/${cdn%100}`,`Community District ${cdn%100} profile`)]:[]),
-      ...(cou?[L(`https://council.nyc.gov/district-${cou}/`,`Council District ${cou}`)]:[]),
-      L(`https://roadview.planninglabs.nyc/view/${lng}/${lat}`,"Street-level imagery"),L(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,"Google Maps")]]];
+      ...(cou?[L(`https://council.nyc.gov/district-${cou}/`,`Council District ${cou}`)]:[])]]].filter(([,ls])=>ls.length);
   const bblX=Math.round(P.bbl[i]), inSel=st.sels.some(e=>exclOf(e.sel).has(bblX)||selIdx0(P,e.sel).includes(i)), isX=st.sels.some(e=>exclOf(e.sel).has(bblX));
   const links=`<div class="lotlinks">${st.peek!=null?`<button data-selpeek>Select this lot</button>`:""}${st.peek!=null&&inSel?`<button data-exlot="${bblX}">${isX?"Count in selection":"Leave out of selection"}</button>`:""}<a href="https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}" target="_blank" rel="noopener">Open in ZoLa</a>
     <a href="https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${boro}&block=${b5}&lot=${l4}" target="_blank" rel="noopener">DOB BIS</a>
     <a href="https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${boro}&block=${block}&lot=${lot}" target="_blank" rel="noopener">ACRIS</a>
+    <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" target="_blank" rel="noopener">Google Maps</a>
+    <a href="https://roadview.planninglabs.nyc/view/${lng}/${lat}" target="_blank" rel="noopener">Street view</a>
     <button data-goblock="${boro*1e5+block}">Select block ${block}</button></div>`;
   specs.links={title:"Links", html:!R?`<p class="soft">${wait}</p>`:groups.map(([t,ls])=>`<div class="lgrp"><span>${t}</span><p>${ls.join("")}</p></div>`).join("")};
   return {specs, links, R};
@@ -878,7 +919,7 @@ const CMP_METRIC={lu:"area",ub:"units",fl:"lots",age:"lots",zone:"area",fc:"lots
 const CMP_MNAME={lots:"% lots",area:"% area",units:"% units"};
 function cmpColumns(){
   const P=st.P, C=st.C, mixed=C&&!!P.far!==!!C.far;
-  const mk=(sel,name,color,pick)=>{ const c={name,color,pick,S:computeStats(P,selIndices(P,sel),st.opts,mixed)}; if (C) c.B=computeStats(C,selIndices(C,sel),st.opts,mixed); return c; };
+  const mk=(sel,name,color,pick)=>{ const ix=selIndices(P,sel), c={name,color,pick,S:computeStats(P,ix,statOpts(P,sel,ix),mixed)}; if (C){ const iy=selIndices(C,sel); c.B=computeStats(C,iy,statOpts(C,sel,iy),mixed); } return c; };
   if (st.sels.length>1&&st.view==="cmp"){ const all={type:"multi",parts:st.sels.map(e=>e.sel)};
     const cols=[mk(all,"All selections","#8795A3","all"),...st.sels.map((e,k)=>mk(e.sel,selTitle(P,e.sel,0)[0],e.color,k))];
     const r=C?st.opts.cmpRel||"cur":"cur"; return {cols:cols.map(c=>({...c,S:r==="old"?c.B:c.S,D:r==="chg"?c.B:null}))}; }
@@ -943,8 +984,12 @@ function renderClipRow(){
   if (!ks.length || (sel&&sel.type==="lots")){ row.hidden=true; row.innerHTML=""; return; }
   const vals=[...new Set(ks.flatMap(k=>clipsIn(st.sels[k].sel)))];
   row.hidden=false; row.innerHTML=`<label title="How lots on the boundary are treated">Lot inclusion ${clipSelect(vals[0],vals.length>1)}</label>`+
-    (ks.length>1&&ks.length<st.sels.length?` <span class="soft">applies to ${ks.length} of ${st.sels.length} selections</span>`:"");
+    (ks.length>1&&ks.length<st.sels.length?` <span class="soft">applies to ${ks.length} of ${st.sels.length} selections</span>`:"")+
+    `<span class="parkrow"><label title="${esc(PARK_DESC[st.opts.park])}">Park rules <select data-park>${Object.entries(PARK_NAME).map(([k,t])=>`<option value="${k}" title="${esc(PARK_DESC[k])}"${k===st.opts.park?" selected":""}>${t}</option>`).join("")}</select></label><button class="infob" data-parkinfo aria-expanded="${!!st.parkInfo}" aria-label="About park rules" title="About park rules">i</button></span>`+
+    (st.parkInfo?`<span class="parknote">Parks and other open-space lots can be huge. Under <b>Intersecting</b>, a park that only touches the circle or shape counts in full, so a ½ mi radius can pick up hundreds of acres of park that lie mostly outside it. Park rules change only <b>Open Space &amp; Outdoor Recreation</b> lots; other land uses are untouched.<br><b>Whole park</b>: counts the full lot (the usual way).<br><b>Part inside</b>: counts only the share of the park's area inside the shape.<br><b>Leave out edge parks</b>: drops parks that cross the boundary.<br><b>Leave out all parks</b>: drops every park lot.<br>Applies to radius, walkshed and drawn selections; NTAs, tracts, lots and blocks are always whole lots.</span>`:"");
 }
+function setPark(v){ const was=st.opts.park; if (v===was||!PARK_NAME[v]) return; st.opts.park=v; renderProfile(); writeHash();
+  toast(`Park rules: ${PARK_NAME[v].toLowerCase()}.`,"Undo",()=>{ st.opts.park=was; renderProfile(); writeHash(); }); }
 function applyClip(v){
   const ks=clipTargets(); st.clip=v; if (!ks.length) return;
   const set=x=>x.type==="group"?{...x,parts:x.parts.map(p=>isShape(p)?{...p,clip:v}:p)}:{...x,clip:v};
@@ -966,7 +1011,7 @@ function lotRecord(i, extra){
 function renderProfile(){
   const prof=$("#profile"), sel=st.sel, P=st.P; renderClipRow();
   $("#actions").hidden=!sel; $("#btnX").hidden=!st.sels.length; $("#btnX").title="Clear the selection (Ctrl+Z to undo)"; $("#btnX").setAttribute("aria-label","Clear the selection");
-  const g=sel&&sel.type==="group"; $("#btnSplit").hidden=!g; $("#btnAddTo").hidden=!g;
+  const g=sel&&sel.type==="group"; $("#btnSplit").hidden=!g||!!sel.minus; $("#btnAddTo").hidden=!g;
   if (g){ $("#btnSplit").textContent="Split"; $("#btnSplit").title=`Turn this merged area back into its ${sel.parts.length} separate parts`; const on=st.addTo===curIndex(); $("#btnAddTo").textContent=on?"Done adding":"Add circles"; $("#btnAddTo").classList.toggle("on",on); }
   $("#back").hidden=!(sel&&st.prevSel);
   if (st.prevSel){ const ps=st.prevSel, s=ps.sels.length===1?ps.sels[0].sel:typeof ps.view==="number"?ps.sels[ps.view].sel:{type:"multi",parts:ps.sels.map(e=>e.sel)};
@@ -994,13 +1039,13 @@ function renderProfile(){
 
   $("#opts").hidden=false;
   if ((st.sels.length>1&&st.view==="cmp")||st.C) return renderCompare(prof);
-  const S=computeStats(P,idx,st.opts); st.specs=sectionSpecs(S); st.S=S;
+  const S=computeStats(P,idx,statOpts(P,sel,idx)); st.specs=sectionSpecs(S); st.S=S;
   const order=st.opts.order.filter(k=>st.specs[k]);
   const shA=clippable(sel)&&clipsIn(sel).includes("touch")?shapeAcres(sel):null, over=shA&&S.acres>shA*1.2;
   const boros=[...new Set(Array.from(idx,i=>Math.floor(P.bbl[i]/1e9)))].sort();
   const boroLine=boros.length>1||st.opts.boroExcl.size?`<p class="borol">${boros.length>1?`Spans ${boros.map(b=>BORO[b]).join(", ")}. Count only: ${boros.map(b=>`<button class="link" data-onlyboro="${b}">${BORO[b]}</button>`).join(" · ")}`:""}${st.opts.boroExcl.size?` ${[...st.opts.boroExcl].map(b=>BORO[b]).join(", ")} left out. <button class="link" data-onlyboro="all">Count every borough</button>`:""}</p>`:"";
   const dqLine=S.dqLots||st.opts.dq.mode!=="pluto"?`<p class="dqline"><b>${fmt(S.dqLots)} lot${S.dqLots===1?"":"s"}</b> here ${S.dqLots===1?"has":"have"} possible PLUTO data issues (${fmt(S.dqUnits)} units). Figures: ${[["pluto","Count them"],["exclude","Leave them out"]].map(([k,t])=>`<button class="link${st.opts.dq.mode===k?" on":""}" data-dqmode="${k}">${t}</button>`).join(" · ")}${st.colorBy!=="dq"?` · <button class="link" data-dqview>Show on map</button>`:""}</p>`:"";
-  prof.innerHTML=`${filterChips()}${boroLine}${dqLine}${over?`<p class="warn spill">The lots counted cover ${fmt(S.acres,0)} acres, but the shape itself is ${fmt(shA,0)} acres: large lots (parks, rail yards, campuses) that only touch it count in full under <b>Intersecting</b>. <button class="link" data-clipto="center">Use Centroid within</button> or <button class="link" data-clipto="most">Majority within</button>.</p>`:""}<div class="tiles">
+  prof.innerHTML=`${filterChips()}${boroLine}${dqLine}${over?`<p class="warn spill">The lots counted cover ${fmt(S.acres,0)} acres, but the shape itself is ${fmt(shA,0)} acres: large lots (parks, rail yards, campuses) that only touch it count in full under <b>Intersecting</b>. <button class="link" data-clipto="center">Use Centroid within</button> or <button class="link" data-clipto="most">Majority within</button>${st.opts.park==="whole"?`, or count only the <button class="link" data-parkto="part">part of parks inside</button>`:""}.</p>`:""}${S.parkOut||S.parkCut?`<p class="dqline">Park rules: ${S.parkOut?`${fmt(S.parkOut)} park lot${S.parkOut===1?"":"s"} left out`:""}${S.parkOut&&S.parkCut?"; ":""}${S.parkCut?`${fmt(S.parkCut/43560,1)} acres of park outside the shape not counted`:""}. <button class="link" data-parkto="whole">Count whole parks</button></p>`:""}<div class="tiles">
       <div><div class="v">${fmt(S.lots)}</div><div class="k">Tax lots</div></div>
       <div><div class="v">${fmt(S.acres,1)}</div><div class="k">Acres of lots</div></div>
       <div><div class="v">${fmt(S.units)}</div><div class="k">Housing units</div></div>
@@ -1025,7 +1070,7 @@ function colorExpr(v, get){
   if (v==="fl"){ const f=["match",flClassExpr(get(v))]; FL_COLORS.forEach((c,i)=>f.push(i,c)); f.push(NODATA); return f; }
   const m=["match",get(v)];
   if (v==="lu"){ LU_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
-  if (v==="ub"){ UB_RAMP.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
+  if (v==="ub"){ const k=ubIndex(); for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(NODATA); return m; }
   if (v==="fc"){ FC_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
   if (v==="dq"){ DQ_COLORS.forEach((c,i)=>m.push(i,c)); m.push(DQ_COLORS[0]); return m; }
   if (v==="zn"){ st.P.dict.zone.forEach((z,i)=>m.push(i,zoneColor(z))); m.push(NODATA); return m; }
@@ -1048,7 +1093,7 @@ function fillColor(){
 const FADE_STATE_MAX=60000;
 let fadeLots=new Set(), fadeBlocks=new Set(), fadeBig=false;
 const dimOn=()=>{ const idx=st.curIdx; return !!(st.map.dim && idx && idx.length && idx.length<st.P.n); };
-const fillOp=()=>st.map.fill?st.map.opacity:0;
+const fillOp=()=>st.map.fill&&!st.map.colorsOff?st.map.opacity:0;
 const topAlpha=(op,on)=>on?0:Math.max(0,(op-op*0.22)/(1-op*0.22));
 function lotOpacity(){
   const op=fillOp(), idx=st.curIdx, n=st.P.n;
@@ -1104,14 +1149,14 @@ function blockValues(P, v){
   const cat=CAT_VIEWS.has(v), arr=v==="lu"?P.lu:v==="ub"?P.ub:v==="zn"?P.zone:v==="fc"?P.fc:v==="dq"?dqAll(P):null;
   const num=v==="bf"?P.bfar:v==="mf"?P.mfar:v==="fd"?P.fdiff:/^[bg]_/.test(v)&&P.far?(()=>{ const k="far_"+v.slice(2), b=P.far.data[k], base=P.mfar;
     if (!b) return null; if (v[0]==="b") return b; const g=new Float32Array(P.n); for (let i=0;i<P.n;i++) g[i]=b[i]-base[i]; return g; })():null;
-  const acc=new Map(), ag=st.map.blockAgg;
+  const acc=new Map(), ag=st.map.blockAgg, rm=v==="ub"?ubFirst():null;
   for (let j=0;j<B;j++){
     if (v==="yb"){ const ys=[]; for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue; const y=P.year[i]; if (y>0) ys.push(y); }
       if (ys.length){ ys.sort((a,b)=>a-b); out[j]=ag.yb==="min"?ys[0]:ag.yb==="max"?ys[ys.length-1]:ys[ys.length>>1]; } continue; }
     if (cat){ acc.clear(); let best=-1, bv=0;
       for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue;
         const wt=ag.cat==="lots"?1:ag.cat==="units"?P.units[i]:(P.area[i]||1); if (!(wt>0)) continue;
-        const k=arr[i], a=(acc.get(k)||0)+wt; acc.set(k,a); if (a>bv){ bv=a; best=k; } }
+        const k=rm&&arr[i]<9?rm[arr[i]]:arr[i], a=(acc.get(k)||0)+wt; acc.set(k,a); if (a>bv){ bv=a; best=k; } }
       if (best>=0) out[j]=best; continue; }
     if (num){ let s=0, w=0, lo=Infinity, hi=-Infinity; const xs=ag.num==="median"?[]:null;
       for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue; const x=num[i]; if (Number.isNaN(x)) continue; const a=P.area[i]||1;
@@ -1137,10 +1182,11 @@ function styleBlocks(force){
 function renderLegend(){
   const v=st.colorBy, H=CAT_VIEWS.has(v)?st.map.hidden[v]:null, ready=farReady(v);
   const editable=["ub","yb","fc","zn","fl"].includes(v)&&ready&&st.map.fill;
-  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show"`:""}>${editable&&ck!=null&&code!==255?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
+  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. Shift-click to show only this one"`:""}>${editable&&ck!=null&&code!==255?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
   let h="";
   if (v==="lu") h=st.P.dict.lu.map((t,i)=>sw(i,LU_COLORS[i],t)).join("");
-  if (v==="ub") h=st.P.dict.ub.map((t,i)=>sw(i,UB_RAMP[i],t.replace("-","–"))).join("")+sw(255,NODATA,"No housing");
+  if (v==="ub"){ const G=ubGroups(), dflt=ubDefault();
+    h=st.ubEdit&&ready&&st.map.fill?ubEditor(G):`<div class="ubhead"><span>${dflt?"":`${G.length} custom buckets`}</span><button class="pen" data-ubedit title="Edit, add or delete buckets" aria-label="Edit buckets">✎</button></div>`+G.map((g,k)=>sw(g[0],UB_MAP[k],dflt?st.P.dict.ub[g[0]].replace("-","–"):groupLabel(g),k)).join("")+sw(255,NODATA,"No housing"); }
   if (v==="fc") h=(ready?st.P.dict.fc:st.P.dict.fc.slice(0,7)).map((t,i)=>sw(i,FC_COLORS[i],t)).join("");
   if (v==="zn"){ const used=new Set(st.P.zone); h=st.P.dict.zone.map((z,i)=>used.has(i)?sw(i,zoneColor(z),z||"None",z||null):"").join(""); }
   if (v==="yb") h=YB_CLASSES.map((c,k)=>sw(null,c[3],c[0],k)).join("")+sw(null,NODATA,"Unknown");
@@ -1154,12 +1200,23 @@ function renderLegend(){
     $("#rMin").value=lo; $("#rMax").value=hi; }
   const ch=schemeChoices(v);
   if (ch.length&&ready&&st.map.fill) h=`<label class="rrow palrow">Colors <select id="palSel">${ch.map(([k,n])=>`<option value="${k}"${schemeOf(v)===k?" selected":""}>${esc(n)}</option>`).join("")}</select></label>`+h;
-  if (!st.map.fill) h=ZD_KEY.map(([t,c])=>`<div><i style="background:${c}"></i>${t}</div>`).join("");
+  if (st.map.fill&&st.map.colorsOff) h=`<div class="legnote">Lot colors are off. Lot and block outlines and selections still show.</div>`;
+  else if (!st.map.fill) h=ZD_KEY.map(([t,c])=>`<div><i style="background:${c}"></i>${t}</div>`).join("");
   else if (!ready) h=`<div class="legnote">${NOT_YET}. Lots show in grey.</div><div class="greyed">${h}</div>`;
-  else if (colorsChanged(v)) h+=`<div class="shint"><button class="linkbtn" data-resetcol="${v}">Reset colors</button></div>`;
-  $("#swatches").innerHTML=h; $("#rangeBox").hidden=!cont||!ready||!st.map.fill;
+  else if (colorsChanged(v)&&!st.map.colorsOff&&!(v==="ub"&&st.ubEdit)) h+=`<div class="shint"><button class="linkbtn" data-resetcol="${v}">Reset colors</button></div>`;
+  $("#swatches").innerHTML=h; $("#rangeBox").hidden=!cont||!ready||!st.map.fill||!!st.map.colorsOff; $("#colorBy").disabled=!!st.map.colorsOff;
   const ak=aggKind(v), as=$("#blockAgg"); as.innerHTML=AGG[ak].map(([k,t])=>`<option value="${k}"${st.map.blockAgg[ak]===k?" selected":""}>${t}</option>`).join("");
-  $(".aggrow").hidden=!ready||!st.map.fill; showZoom();
+  $(".aggrow").hidden=!ready||!st.map.fill||!!st.map.colorsOff; showZoom();
+}
+function ubEditor(G){
+  const S=UB_STARTS, lo=g=>UB_RANGE[g[0]][0], hi=g=>UB_RANGE[g[g.length-1]][1], free=S.slice(1).filter((s,i)=>!st.map.ubDiv[i]);
+  const rows=G.map((g,k)=>{ const prev=k?G[k-1][0]:-1, next=k<G.length-1?G[k+1][0]:9, opts=[];
+    for (let b=prev+1;b<next;b++) if (b>0) opts.push(b);
+    const from=k?`<select data-ubfrom="${k}" aria-label="Bucket ${k+1} starts at">${opts.map(b=>`<option value="${b}"${b===g[0]?" selected":""}>${S[b]}</option>`).join("")}</select>`:"<b>1</b>";
+    return `<div class="ubrow"><span>${from} ${hi(g)==null?"or more":hi(g)===lo(g)?"":`to ${hi(g)}`} unit${hi(g)===1?"":"s"}</span><button class="ubdel" data-ubdel="${k}" title="Delete this bucket (merges it into its neighbor)" aria-label="Delete bucket"${G.length<2?" disabled":""}>✕</button></div>`; }).join("");
+  return `<div class="ubed"><div class="ubhead"><span>Edit buckets</span></div>${rows}`+
+    (free.length?`<div class="ubrow ubadd"><span>Split at <select id="ubSplit">${free.map(s=>`<option value="${S.indexOf(s)}"${S.indexOf(s)===st.ubSplit?" selected":""}>${s}</option>`).join("")}</select> units</span><button class="mini" data-ubadd>Add</button></div>`:"")+
+    `<div class="ubbtns"><button class="mini" data-ubreset${ubDefault()?" disabled":""}>Reset</button><button class="mini on" data-ubdone>Done</button></div><div class="shint">Buckets follow PLUTO's size bands (1, 2, 3, 4, 5–9, 10–19, 20–49, 50–99, 100+), so they can start only at those numbers.</div></div>`;
 }
 
 function showZoom(){ const e=$("#zNow"); if (!e||!map) return; const z=map.getZoom(); e.textContent=`Now ${z.toFixed(1)}: ${z>=lotZ()?"lots":"blocks"}`; }
@@ -1186,9 +1243,11 @@ function applyColors(){
   pick("yb",YB_BASE,5).forEach((c,i)=>YB_CLASSES[i][3]=c);
   pick("fl",FL_BASE,8).forEach((c,i)=>FL_COLORS[i]=c);
   const f=pick("fc",FC_BASE.slice(0,5),5); FC_BASE.forEach((c,i)=>FC_COLORS[i]=i<5?f[i]:c);
-  const T={ub:UB_RAMP,fc:FC_COLORS,fl:FL_COLORS};
+  const T={ub:ubDefault()?UB_RAMP:[],fc:FC_COLORS,fl:FL_COLORS};
   for (const [v,m] of Object.entries(st.colors.custom)) for (const [i,c] of Object.entries(m||{})) if (/^#[0-9a-f]{6}$/i.test(c)){
     if (T[v]) T[v][+i]=c; else if (v==="yb"&&YB_CLASSES[+i]) YB_CLASSES[+i][3]=c; }
+  const n=ubGroups().length, um=n===9?[...UB_RAMP]:n===1?[UB_RAMP[4]]:sample(UB_RAMP,n); UB_MAP.length=0; UB_MAP.push(...um);
+  for (const [i,c] of Object.entries(st.colors.custom.ub||{})) if (/^#[0-9a-f]{6}$/i.test(c)&&+i<n) UB_MAP[+i]=c;
 }
 function setColors(fn){ fn(st.colors); try{ localStorage.setItem("lp-colors2",JSON.stringify(st.colors)); }catch(_){}
   applyColors(); restyleLots(true); renderProfile(); $$("#luFilter i").forEach((el,i)=>el.style.background=LU_COLORS[i]); }
@@ -1219,6 +1278,7 @@ function applyMapOpts(){
   const modes=[...(o.sub.lines?["subway"]:[]),...(o.sub.rail?["path","lightrail","rail"]:[])], lf=["in",["get","m"],["literal",modes]];
   ["sub-line","sub-case"].forEach(id=>{ if(map&&map.getLayer(id)) map.setFilter(id,lf); vis(id,modes.length>0); }); vis("sub-rail-dash",o.sub.rail); vis("sub-ost",o.sub.rail&&o.sub.stations); vis("sub-plat",o.sub.platforms); vis("sub-plat-line",o.sub.platforms);
   vis("sub-ent",o.sub.entrances); vis("sub-st",o.sub.stations); updateStationLabels();
+  vis("bus-line",o.bus.routes); vis("bus-name",o.bus.routes); vis("bus-stop",o.bus.stops);
   $("#satBtn").classList.toggle("on",o.basemap==="sat"); $("#basemap").value=o.basemap;
 }
 const EMPTY={type:"FeatureCollection",features:[]};
@@ -1340,6 +1400,12 @@ function initMap(style){
     map.addSource("ntas",{type:"geojson",data:areasGeoJSON(P,"nta")});
     add({id:"nta-fill",type:"fill",source:"ntas",paint:{"fill-color":"#1B62A5","fill-opacity":["case",["boolean",["feature-state","hover"],false],0.12,0]}});
     add({id:"nta-line",type:"line",source:"ntas",paint:{"line-color":"#14263B","line-width":["interpolate",["linear"],["zoom"],10,0.7,13,1.6],"line-opacity":0.8}});
+    map.addSource("bus-line",{type:"geojson",data:EMPTY,tolerance:0.4,attribution:"Bus: MTA"});
+    add({id:"bus-line",type:"line",source:"bus-line",layout:{visibility:"none","line-cap":"round","line-join":"round"},paint:{"line-color":["get","c"],"line-opacity":0.75,"line-width":["interpolate",["linear"],["zoom"],10,0.7,14,1.6,17,3]}});
+    add({id:"bus-name",type:"symbol",source:"bus-line",minzoom:13,layout:{visibility:"none","symbol-placement":"line","symbol-spacing":420,"text-field":["get","n"],"text-font":st.font,"text-size":10.5,"text-optional":true},paint:{"text-color":["get","c"],"text-halo-color":"#fff","text-halo-width":1.4}});
+    map.addSource("bus-stop",{type:"geojson",data:EMPTY});
+    add({id:"bus-stop",type:"circle",source:"bus-stop",minzoom:12.5,layout:{visibility:"none"},paint:{"circle-radius":["interpolate",["linear"],["zoom"],12.5,1.4,15,3,18,5.5],"circle-color":"#fff","circle-stroke-color":"#1F5F99","circle-stroke-width":["interpolate",["linear"],["zoom"],12.5,0.8,16,1.6]}});
+    if (st.B) drawBus();
     map.addSource("sub-plat",{type:"geojson",data:EMPTY,attribution:"Subway: MTA Open Data, © OpenStreetMap contributors"});
     add({id:"sub-plat",type:"fill",source:"sub-plat",minzoom:13.5,filter:["==",["geometry-type"],"Polygon"],paint:{"fill-color":"#8D97A2","fill-opacity":0.85}});
     add({id:"sub-plat-line",type:"line",source:"sub-plat",minzoom:13.5,paint:{"line-color":"#4E5863","line-width":["case",["==",["geometry-type"],"LineString"],3,0.8]}});
@@ -1395,6 +1461,12 @@ function initMap(style){
     add({id:"draw-fill",type:"fill",source:"draw",filter:["==",["geometry-type"],"Polygon"],paint:{"fill-color":"#1B62A5","fill-opacity":0.12}},true);
     add({id:"draw-line",type:"line",source:"draw",paint:{"line-color":"#1B62A5","line-width":2.5}},true);
     add({id:"draw-pt",type:"circle",source:"draw",filter:["==",["geometry-type"],"Point"],paint:{"circle-radius":4.5,"circle-color":"#fff","circle-stroke-color":"#1B62A5","circle-stroke-width":2}},true);
+    map.addSource("plines",{type:"geojson",data:EMPTY});
+    add({id:"pl-line",type:"line",source:"plines",filter:["==",["geometry-type"],"LineString"],layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":["get","c"],"line-width":["interpolate",["linear"],["zoom"],10,2.5,15,5],"line-dasharray":[1.6,0.9],"line-opacity":["case",["get","draft"],0.6,1]}},true);
+    add({id:"pl-st",type:"circle",source:"plines",filter:["all",["==",["geometry-type"],"Point"],["!",["get","draft"]]],paint:{"circle-radius":["interpolate",["linear"],["zoom"],10,3,15,7],"circle-color":"#fff","circle-stroke-color":["get","c"],"circle-stroke-width":["interpolate",["linear"],["zoom"],10,1.5,15,3]}},true);
+    add({id:"pl-draft",type:"circle",source:"plines",filter:["all",["==",["geometry-type"],"Point"],["get","draft"]],paint:{"circle-radius":5,"circle-color":"#fff","circle-stroke-color":["get","c"],"circle-stroke-width":2.5}},true);
+    add({id:"pl-name",type:"symbol",source:"plines",minzoom:12.5,filter:["==",["geometry-type"],"Point"],layout:{"text-field":["get","n"],"text-font":st.font,"text-size":11.5,"text-offset":[0.9,0],"text-anchor":"left","text-optional":true},paint:{"text-color":"#14263B","text-halo-color":"#fff","text-halo-width":1.8}},true);
+    drawPLines();
     styleBlocks(true); renderLegend(); applyMapOpts(); drawSelection(); if (st.T) drawTransit();
     map.on("moveend",updateStationLabels);
     let pfT=null; map.on("idle",()=>{ clearTimeout(pfT); pfT=setTimeout(()=>prefetchGeom(st.P),250); });
@@ -1540,6 +1612,28 @@ async function loadTransit(){
   if (st.pending){ const p=st.pending; st.pending=null; restore(p.sels,p.view,true); } else if (st.sels.length){ drawSelection(); renderProfile(); }
   if (!first) toast(`Subway map now shows ${T.date}${pk&&pk.how==="nearest"?`, the closest snapshot to ${rel.id}`:""}.`);
 }
+let busLoad=null, busOpen=null;
+function busFile(){ if (window.__LP__) return Promise.resolve(window.__LP__.bus||null);
+  return fetch("data/bus_index.json").then(r=>r.ok?r.json():null).then(x=>x?fetch("data/"+x.file).then(r=>r.ok?r.json():null):null); }
+function loadBus(){ if (busLoad) return busLoad; const out=$("#busStatus"); out.textContent="Bus data: loading…";
+  busLoad=busFile().then(B=>{ if (!B) throw new Error("bus data is missing"); st.B=B; drawBus();
+    out.textContent=`Bus data: MTA feed of ${B.feed}. ${fmt(B.stops.length)} stops, ${fmt(B.routes.length)} routes.`; })
+    .catch(err=>{ busLoad=null; console.warn("bus:",err); out.textContent=`Bus data didn't load (${err.message}).`; });
+  return busLoad; }
+function drawBus(){ const B=st.B; if (!B||!map||!map.getSource("bus-stop")) return;
+  map.getSource("bus-stop").setData({type:"FeatureCollection",features:B.stops.map((s,k)=>({type:"Feature",properties:{k},geometry:{type:"Point",coordinates:[s[0],s[1]]}}))});
+  map.getSource("bus-line").setData({type:"FeatureCollection",features:B.lines.map(l=>{ const r=B.routes[l.r]; return {type:"Feature",properties:{r:l.r,n:r.n,c:r.c},geometry:{type:"LineString",coordinates:l.g}}; })}); }
+const busPill=r=>`<span class="brt" style="background:${esc(r.c)};color:${esc(r.t)}">${esc(r.n)}</span>`;
+function busStopAt(pt){ if (!st.B||!st.map.bus.stops||!map.getLayer("bus-stop")) return [];
+  return map.queryRenderedFeatures([[pt.x-5,pt.y-5],[pt.x+5,pt.y+5]],{layers:["bus-stop"]}); }
+function busTip(pt){ if (!st.B||!st.map.bus.routes||!map.getLayer("bus-line")) return "";
+  const f=map.queryRenderedFeatures([[pt.x-4,pt.y-4],[pt.x+4,pt.y+4]],{layers:["bus-line"]}), rs=[...new Set(f.map(x=>x.properties.r))]; if (!rs.length) return "";
+  return `<div class="tipbus">${rs.slice(0,6).map(i=>{ const r=st.B.routes[i]; return `<div>${busPill(r)} ${esc(r.name)}</div>`; }).join("")}${rs.length>6?`<div>and ${rs.length-6} more</div>`:""}</div>`; }
+function busPopup(k){ const s=st.B.stops[k], rs=s[3].map(i=>st.B.routes[i]);
+  $("#maptip").hidden=true; busOpen=k;
+  openPopup([s[0],s[1]],`<div class="stpop"><h3>${esc(s[2])}</h3><div class="stmeta">Bus stop · ${rs.length} route${rs.length>1?"s":""}</div>
+    <div class="brts">${rs.map(r=>`<div>${busPill(r)} <span>${esc(r.name)}</span></div>`).join("")}</div>
+    ${walkBox({ent:false,fromRow:false,go:`<button class="wgo" data-wbus="${k}">Select around this stop</button>`})}</div>`); }
 function drawTransit(){
   const T=st.T; if (!T||!map||!map.getSource("sub-st")) return;
   map.getSource("sub-line").setData(T.lines); map.getSource("sub-plat").setData(T.platforms);
@@ -1564,15 +1658,72 @@ function drawRings(){
   const m=st.map.rings; if (!m||!st.T){ map.getSource("rings").setData(EMPTY); return; }
   map.getSource("rings").setData({type:"FeatureCollection",features:st.T.stations.map(s=>({type:"Feature",properties:{},geometry:{type:"Polygon",coordinates:[starUnion(walkPts(s.id),m)]}}))});
 }
+const PL_COLORS=["#8E44AD","#D35400","#16A085","#C0392B","#2C3E50","#B7950B"];
+const IBX={name:"Interborough Express",color:"#8E44AD",preset:"ibx",stops:[[-74.02587,40.64016,"Brooklyn Army Terminal"],[-74.02169,40.63771,"4 Av"],[-74.01052,40.63457,"8 Av"],[-73.99687,40.62653,"New Utrecht Av"],[-73.97651,40.6273,"McDonald Av"],[-73.9612,40.62915,"East 16 St"],[-73.94746,40.63058,"Flatbush–Nostrand Avs"],[-73.92878,40.63677,"Utica Av"],[-73.91372,40.6472,"Remsen Av"],[-73.89994,40.65721,"Linden Blvd"],[-73.90069,40.66377,"Livonia Av"],[-73.90395,40.67599,"Atlantic Av"],[-73.90448,40.68864,"Wilson Av"],[-73.8943,40.70082,"Myrtle Av"],[-73.88885,40.71229,"Metropolitan Av"],[-73.88491,40.72237,"Eliot Av"],[-73.88631,40.7306,"Grand Av"],[-73.89387,40.74559,"Roosevelt Av"]],
+  path:[[-74.02587,40.64016],[-74.02246,40.63809],[-74.02156,40.63765],[-74.013,40.63531],[-74.0102,40.63447],[-74.0095,40.63411],[-73.99827,40.62733],[-73.99643,40.62628],[-73.995,40.62569],[-73.99409,40.62547],[-73.99341,40.62537],[-73.99253,40.62533],[-73.9916,40.62536],[-73.98429,40.62607],[-73.97255,40.62793],[-73.9578,40.62952],[-73.95217,40.63006],[-73.94178,40.6312],[-73.94069,40.63137],[-73.93928,40.6317],[-73.9384,40.63197],[-73.93693,40.63255],[-73.92636,40.63803],[-73.92501,40.63879],[-73.92377,40.63961],[-73.91906,40.64337],[-73.91599,40.64572],[-73.90232,40.65461],[-73.90131,40.65537],[-73.90052,40.6562],[-73.89998,40.65708],[-73.89965,40.65826],[-73.89965,40.65936],[-73.89987,40.66053],[-73.90103,40.66511],[-73.90249,40.67073],[-73.90301,40.67232],[-73.90569,40.68279],[-73.90592,40.68421],[-73.90587,40.68535],[-73.90574,40.68607],[-73.90524,40.68745],[-73.90463,40.68846],[-73.90397,40.68925],[-73.90217,40.69102],[-73.90124,40.69208],[-73.90061,40.69301],[-73.89917,40.69548],[-73.89808,40.69696],[-73.89638,40.69877],[-73.89351,40.70159],[-73.89244,40.70283],[-73.89144,40.70428],[-73.89075,40.70589],[-73.88993,40.70945],[-73.88953,40.71079],[-73.88796,40.71424],[-73.88621,40.71781],[-73.88559,40.71926],[-73.88524,40.72039],[-73.88488,40.72257],[-73.88483,40.72358],[-73.88488,40.72457],[-73.88525,40.7268],[-73.88599,40.72969],[-73.88686,40.7322],[-73.88829,40.73559],[-73.88996,40.73884],[-73.89173,40.74212],[-73.89387,40.74559]],
+  note:"18 stations from the MTA's preliminary plan, placed where the Bay Ridge Branch and Fremont Secondary tracks (OpenStreetMap) cross each station's street."};
+const pStop=id=>{ const m=/^p(\d+)\.(\d+)$/.exec(id||""); if (!m) return null; const L=st.lines[+m[1]], s=L&&L.stops[+m[2]]; return s?{lng:s[0],lat:s[1],name:s[2],line:L,li:+m[1],si:+m[2]}:null; };
+const encLine=L=>[L.name,L.color,L.stops.map(([x,y,n])=>`${x.toFixed(5)},${y.toFixed(5)},${n}`).join(";")].concat(L.hidden?["h"]:[""]).concat(L.preset?[L.preset]:[]).join("~");
+function parseLine(s){ const [name,color,stops,h,pre]=s.split("~"); if (!stops||!/^#[0-9a-f]{6}$/i.test(color)) return null;
+  const S=stops.split(";").map(t=>{ const [x,y,...n]=t.split(","); return [+x,+y,n.join(" ")||"Station"]; }).filter(([x,y])=>Number.isFinite(x)&&Number.isFinite(y));
+  return S.length>1?{name:name||"New line",color,stops:S,...(h==="h"?{hidden:true}:{}),...(pre==="ibx"?{preset:"ibx",path:IBX.path}:{})}:null; }
+function drawPLines(cursor){
+  if (!map||!map.getSource("plines")) return; const f=[];
+  st.lines.forEach((L,li)=>{ if (L.hidden) return; f.push({type:"Feature",properties:{c:L.color,draft:false},geometry:{type:"LineString",coordinates:L.path||L.stops.map(s=>[s[0],s[1]])}});
+    L.stops.forEach((s,si)=>f.push({type:"Feature",properties:{c:L.color,n:s[2],id:`p${li}.${si}`,draft:false},geometry:{type:"Point",coordinates:[s[0],s[1]]}})); });
+  if (st.draft){ const c=PL_COLORS[st.lines.length%PL_COLORS.length], pts=st.draft.map(s=>[s[0],s[1]]).concat(cursor&&st.draft.length?[cursor]:[]);
+    if (pts.length>1) f.push({type:"Feature",properties:{c,draft:true},geometry:{type:"LineString",coordinates:pts}});
+    st.draft.forEach(s=>f.push({type:"Feature",properties:{c,n:s[2],draft:true},geometry:{type:"Point",coordinates:[s[0],s[1]]}})); }
+  map.getSource("plines").setData({type:"FeatureCollection",features:f}); renderPLines(); }
+function addLine(L){ st.lines.push(L); drawPLines(); writeHash(); const b=L.stops.reduce((q,[x,y])=>[Math.min(q[0],x),Math.min(q[1],y),Math.max(q[2],x),Math.max(q[3],y)],[180,90,-180,-90]);
+  map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:80,duration:600,maxZoom:15}); }
+function finishPLine(){ const d=st.draft||[]; if (d.length<2){ toast("A line needs at least two stations."); return; }
+  const L={name:`New line ${st.lines.length+1}`,color:PL_COLORS[st.lines.length%PL_COLORS.length],stops:d}; st.draft=null; setMode("view"); addLine(L);
+  toast(`${L.name} added with ${d.length} stations. Click a station for walksheds; rename it under Map layers.`); }
+function removeLine(li){ const L=st.lines[li]; st.lines.splice(li,1); if (popup) popup.remove(); drawPLines(); writeHash();
+  toast(`${L.name} removed.`,"Undo",()=>{ st.lines.splice(li,0,L); drawPLines(); writeHash(); }); }
+function renderPLines(){ const el=$("#plines"); if (!el) return;
+  el.innerHTML=st.lines.map((L,li)=>`<div class="plrow" data-li="${li}"><input type="checkbox" data-plshow${L.hidden?"":" checked"} aria-label="Show ${esc(L.name)}"><label class="plc" style="background:${L.color}" title="Line color"><input type="color" data-plcolor value="${L.color}" aria-label="Line color"></label><input class="pln" data-plname value="${esc(L.name)}" aria-label="Line name"><small title="${L.stops.length} stations">${L.stops.length}</small><button data-plzoom title="Zoom to this line" aria-label="Zoom to line">⌖</button><button data-pldel title="Remove this line" aria-label="Remove line">✕</button></div>`).join("")+
+    `<div class="plbtns"><button class="mini${st.mode==="pline"?" on":""}" data-plnew>＋ New line</button>${st.lines.some(L=>L.name===IBX.name)?"":`<button class="mini" data-plibx title="${esc(IBX.note)}">Add Interborough Express</button>`}</div>`; }
+function wirePLines(){ const el=$("#plines"); if (!el) return;
+  el.addEventListener("click",e=>{ const b=e.target.closest("button"); if (!b) return; const r=b.closest("[data-li]"), li=r?+r.dataset.li:null;
+    if (b.matches("[data-plnew]")){ if (st.mode==="pline") return finishPLine(); setMode("pline"); renderPLines(); }
+    else if (b.matches("[data-plibx]")){ addLine({...IBX,stops:IBX.stops.map(s=>[...s])}); toast("Interborough Express added along the existing freight tracks.",null,null); }
+    else if (b.matches("[data-plzoom]")){ const L=st.lines[li]; const bx=L.stops.reduce((q,[x,y])=>[Math.min(q[0],x),Math.min(q[1],y),Math.max(q[2],x),Math.max(q[3],y)],[180,90,-180,-90]); map.fitBounds([[bx[0],bx[1]],[bx[2],bx[3]]],{padding:80,duration:600,maxZoom:15}); }
+    else if (b.matches("[data-pldel]")) removeLine(li); });
+  el.addEventListener("change",e=>{ const r=e.target.closest("[data-li]"); if (!r) return; const L=st.lines[+r.dataset.li];
+    if (e.target.matches("[data-plshow]")) L.hidden=!e.target.checked||undefined;
+    else if (e.target.matches("[data-plcolor]")) L.color=e.target.value;
+    else if (e.target.matches("[data-plname]")) L.name=e.target.value.replace(/[~;,]/g," ").trim()||"New line";
+    if (!L.hidden) delete L.hidden; drawPLines(); writeHash(); }); }
+function plStopPopup(id){ const q=pStop(id); if (!q) return; const L=q.line;
+  openPopup([q.lng,q.lat],`<div class="stpop"><h3>${esc(q.name)} <span class="pp" style="background:${L.color}">${esc(L.name)}</span></h3>
+    <div class="stmeta">Proposed station ${q.si+1} of ${L.stops.length}. Measured from the station point.</div>
+    ${walkBox({ent:false,fromRow:false,go:`<button class="wgo" data-wgo="${id}">Select around this station</button>`}).replace('</div>\n    <p class="phint">',`<div class="wrow wlines"><span class="wl">Every station on</span><div class="wlb"><button class="wline" data-wline="#${q.li}" title="Select the same distance around every station on this line">${esc(L.name)}</button></div></div><div class="wrow wlines"><span class="wl">Newly served</span><div class="wlb"><button class="wline" data-wline="#${q.li}" data-wnew title="Every station on this line, minus lots already within the same distance of an existing subway entrance">Not near the subway now</button></div></div></div>\n    <p class="phint">`)}</div>`); }
+function plineSel(li, m, onlyNew){
+  const L=st.lines[li]; if (!L) return null;
+  const parts=L.stops.map(s=>({type:"radius",c:[s[0],s[1]],m,label:`Within ${miles(m)} of ${s[2]} (proposed)`,clip:st.clip}));
+  const g={type:"group",parts,name:`${miles(m)} around ${L.name} (${L.stops.length} proposed stations)`};
+  if (!onlyNew) return g; if (!st.T) return null;
+  const reach=2*m+700, near=st.T.stations.filter(s=>L.stops.some(([x,y])=>((s.lng-x)*mlng(y))**2+((s.lat-y)*MLAT)**2<reach*reach));
+  g.minus=near.map(s=>({type:"walk",sid:s.id,m,clip:st.clip})); g.name=`Newly served by ${L.name}: ${miles(m)}`; if (!g.minus.length) delete g.minus; return g; }
+const WALK_PRESETS=[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]];
+function walkBox(o){
+  const W=st.walk, from=o.ent?W.from:"pt", pre=WALK_PRESETS.some(([m])=>Math.abs(m-W.m)<1), seg=(k,items)=>`<div class="seg wseg" data-wset="${k}">${items}</div>`;
+  const fromRow=o.fromRow===false?"":`<div class="wrow"><span class="wl">Measure from</span>${seg("from",`<button data-v="pt" class="${from==="pt"?"on":""}">Station center</button><button data-v="ent" class="${from==="ent"?"on":""}"${o.ent?"":` disabled title="No entrance data for this station"`}>Entrances</button>`)}</div>`;
+  const lines=(o.routes||[]).length?`<div class="wrow wlines"><span class="wl">Every station on</span><div class="wlb">${o.routes.map(r=>`<button class="wline" data-wline="${esc(r)}"${o.net?` data-net="${esc(o.net)}"`:""} title="Select the same distance around every station on the ${esc(r)} line" aria-label="Every station on the ${esc(r)} line">${o.net?esc(r.replace(/ Branch$/,"")):bullet(r)}</button>`).join("")}</div></div>`:"";
+  return `<div class="wbox" data-from="${from}" data-m="${W.m}">${fromRow}
+    <div class="wrow"><span class="wl">Distance</span><div class="wdist">${seg("m",WALK_PRESETS.map(([m,t])=>`<button data-v="${m}" class="${pre&&Math.abs(m-W.m)<1?"on":""}">${t}</button>`).join(""))}<label class="wcust${pre?"":" on"}">or <input type="number" min="0.05" max="3" step="0.05" inputmode="decimal" value="${pre?"":+(W.m/1609.344).toFixed(2)}" placeholder="0.75" aria-label="Distance in miles"> mi</label></div></div>
+    <div class="wrow wgo-row">${o.go}</div>${lines}</div>
+    <p class="phint">${st.addMode?"Add is on: these are added to your selections.":touchUI()?"Use the Tap menu next to ＋ Add to merge.":`Shift-click adds a selection; ${MOD}-click merges.`}</p>`;
+}
+const walkFrom=b=>{ const x=b.closest(".wbox"); return {from:x.dataset.from, m:+x.dataset.m}; };
 function stationPopup(k, lngLat){
   const s=st.T.stations[k], ne=st.T.entrances.filter(e=>e.sid===s.id);
   const kinds={}; ne.forEach(e=>kinds[e.type]=(kinds[e.type]||0)+1);
   const html=`<div class="stpop"><h3>${esc(s.name)} ${s.routes.map(bullet).join("")}</h3>
-    ${esc(s.structure)}${s.structure?". ":""}${s.ada===1?"Fully accessible":s.ada===2?"Partially accessible":"Not accessible"}.<br>
-    ${ne.length?`${ne.length} entrance${ne.length>1?"s":""}: ${Object.entries(kinds).map(([t,c])=>`${c} ${esc(t.toLowerCase())}`).join(", ")}`:"No entrance data; walksheds use the station point."}
-    <div class="walk">Walkshed from entrances: ${[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]].map(([m,t])=>`<button data-walk="${esc(s.id)}" data-m="${m}">${t}</button>`).join("")}</div>
-    <div class="walk">½ mi around every station on ${s.routes.map(r=>`<button data-route="${esc(r)}" title="Adds one walkshed per station that reaches the loaded lots">${bullet(r)}</button>`).join("")}</div>
-    <p class="phint">${st.addMode?"Add is on: walksheds are added to your selections.":"Shift-click, or turn on Add, to keep earlier selections."}</p></div>`;
+    <div class="stmeta">${esc(s.structure||"Subway")} · ${s.ada===1?"Fully accessible":s.ada===2?"Partially accessible":"Not accessible"} · ${ne.length?`${ne.length} entrance${ne.length>1?"s":""} (${Object.entries(kinds).map(([t,c])=>`${c} ${esc(t.toLowerCase())}`).join(", ")})`:"no entrance data"}</div>
+    ${walkBox({ent:ne.length>0,routes:s.routes,go:`<button class="wgo" data-wgo="${esc(s.id)}">Select around this station</button>`})}</div>`;
   openPopup(lngLat||[s.lng,s.lat], html);
 }
 const LR={HBLR:["Hudson-Bergen Light Rail","#1C8FC7"],NLR:["Newark Light Rail","#8C4FA3"],LIRR:["LIRR","#0F61A9"],MNR:["Metro-North","#0F7B5F"]};
@@ -1583,18 +1734,29 @@ const pathPills=rs=>(rs||[]).map(r=>`<span class="pp" style="background:${st.T.p
 function otherPopup(k){
   const s=st.T.other[k], ne=st.T.entrances.filter(e=>e.sid==="o"+k).length;
   openPopup([s.lng,s.lat],`<div class="stpop"><h3>${esc(s.name)}</h3><div class="pps">${netPills(s)}</div>
-    <div class="walk">Walkshed: ${[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]].map(([m,t])=>`<button data-walk="o${k}" data-m="${m}">${t}</button>`).join("")}</div>
-    ${isRail(s)&&(s.routes||[]).length?`<div class="walk">½ mi around every station on ${s.routes.map(r=>`<button data-oroute="${esc(r)}" data-net="${s.net}">${esc(r.replace(/ Branch$/,""))}</button>`).join("")}</div>`:""}
-    <p class="phint">${ne?`Measured from ${ne} entrance${ne>1?"s":""} (OpenStreetMap).`:`No entrance data for ${esc(netLabel(s))} yet, so this measures from the station point.`} ${st.addMode?"Add is on.":"Shift-click, or turn on Add, to keep earlier selections."}</p></div>`);
+    <div class="stmeta">${ne?`${ne} entrance${ne>1?"s":""} (OpenStreetMap)`:`No entrance data for ${esc(netLabel(s))} yet`}</div>
+    ${walkBox({ent:ne>0,routes:isRail(s)?s.routes:[],net:s.net,go:`<button class="wgo" data-wgo="o${k}">Select around this station</button>`})}</div>`);
 }
 function entrancePopup(k, lngLat){
   const e=st.T.entrances[k], s=st.T.byId.get(e.sid);
   openPopup(lngLat||[e.lng,e.lat], `<div class="stpop"><h3>${esc(e.type)} to ${esc(s?s.name:"")} ${(s?s.routes:[]).map(bullet).join("")}</h3>
-    ${e.entry&&e.exit?"Entry and exit":e.entry?"Entry only":"Exit only"}
-    <div class="walk">From this entrance: ${[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]].map(([m,t])=>`<button data-ent="${k}" data-m="${m}">${t}</button>`).join("")}</div>
-    <div class="walk">Whole station: <button data-walk="${esc(e.sid)}" data-m="804.7">½ mi walkshed</button></div></div>`);
+    <div class="stmeta">${e.entry&&e.exit?"Entry and exit":e.entry?"Entry only":"Exit only"}</div>
+    ${walkBox({ent:true,fromRow:false,go:`<button class="wgo" data-went="${k}">From this entrance</button><button class="wgo sec" data-wgo="${esc(e.sid)}" data-wfrom="ent">From all its entrances</button>`})}</div>`);
 }
-
+function stationSel(sid, m, from){
+  if (sid[0]==="p"){ const q=pStop(sid); return q?{type:"radius",c:[q.lng,q.lat],m,label:`Within ${miles(m)} of ${q.name} (proposed, ${q.line.name})`,clip:st.clip}:null; }
+  const x=st.T.byId.get(sid); if (!x) return null;
+  if (from==="ent") return {type:"walk",sid,m,clip:st.clip};
+  const nm=sid[0]==="o"?x.name:`${x.name} station`;
+  return {type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of ${nm}`,clip:st.clip};
+}
+function lineSel(r, net, m, from){
+  const [[x0,y0],[x1,y1]]=st.P.bbox, pad=0.012, inb=s=>s.lng>x0-pad&&s.lng<x1+pad&&s.lat>y0-pad&&s.lat<y1+pad;
+  const ids=net?st.T.other.map((s,k)=>[s,k]).filter(([s])=>s.net===net&&(s.routes||[]).includes(r)&&inb(s)).map(([,k])=>"o"+k)
+    :st.T.stations.filter(s=>s.routes.includes(r)&&inb(s)).map(s=>s.id);
+  const parts=[...new Set(ids)].map(sid=>stationSel(sid,m,from)).filter(Boolean);
+  return parts.length?{type:"group",parts}:null;
+}
 let drawPts=[], radiusC=null, hov=null, rafQ=false, lastEv=null, popup=null;
 const clipSelect=(v,mixed)=>`<select data-clip title="${esc(mixed?"":CLIP_DESC[v])}">${mixed?`<option value="" selected>Mixed</option>`:""}${Object.entries(CLIP_NAME).map(([k,t])=>`<option value="${k}" title="${esc(CLIP_DESC[k])}"${k===v&&!mixed?" selected":""}>${t}</option>`).join("")}</select>`;
 const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl", ALT=MAC?"Option":"Alt";
@@ -1602,6 +1764,7 @@ const HINTS={
   lot:"Click a lot to open its record.",
   block:"Click a tax block to select it.",
   poly:"Click to add corners. Click the first corner or press Enter to finish. Esc cancels.",
+  pline:"New line: click each station in order (clicks snap to existing stations). Double-click or Enter to finish, Backspace removes the last station, Esc cancels.",
   measure:"Click or tap to add points, then Done (or double-click / Enter).",
   radius:"Click the center, move out, then click again. Clicks snap to entrances and stations; with a fixed radius and Add on, click station after station. Radius:"};
 const TAP_TEXT={merge:"Taps merge into the current selection.",out:"Taps leave a lot out of the selection."};
@@ -1637,8 +1800,9 @@ function setMode(m){
     +(m==="measure"?` <button data-mk="line" class="${meas.kind==="line"?"on":""}">Distance</button><button data-mk="area" class="${meas.kind==="area"?"on":""}">Area</button><button data-mdone>Done</button><button data-mclear>Clear</button> <b id="measOut">${measText()}</b>`:"")
     +(m==="radius"||m==="poly"?` <span class="cliphint">Lot inclusion: <b>${CLIP_NAME[st.clip]}</b> (change with ▾)</span>`:"")
     +(st.addTo!=null&&st.sels[st.addTo]?` <span class="cliphint">Adding to <b>${esc(groupName(st.sels[st.addTo].sel))}</b>. <button data-doneadd>Done</button></span>`:""):"")+kh+th;
-  map.getCanvas().style.cursor=m==="poly"||m==="radius"||m==="measure"?"crosshair":"";
-  if (m==="poly"||m==="measure") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
+  map.getCanvas().style.cursor=m==="poly"||m==="radius"||m==="measure"||m==="pline"?"crosshair":"";
+  if (m==="poly"||m==="measure"||m==="pline") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
+  if (m!=="pline"&&st.draft){ st.draft=null; drawPLines(); }
   clearHover(); $("#maptip").hidden=true; applyMapOpts();
 }
 
@@ -1665,7 +1829,12 @@ function lotCard(i){ const P=st.P, y=P.year[i], {boro,block,lot}=bblParts(P.bbl[
     ${(()=>{ const q=dqIssues(P,i); return q.length?`<div class="lc-f lc-dq">Possible data issue: ${q.map(k=>DQ_NAMES[k].toLowerCase()).join("; ")}</div>`:""; })()}</div>`; }
 function blockCard(j, hint){ const P=st.P, b=P.blocks[j];
   return `<div class="lc"><div class="lc-h"><b>${blockName(b.key)}</b><span>${fmt(P.blkCount[j])} lots</span></div>${hint?`<div class="lc-f">${hint}</div>`:""}</div>`; }
-function openPopup(ll,html){ if (popup) popup.remove(); popup=new maplibregl.Popup({maxWidth:"290px"}).setLngLat(ll).setHTML(html).addTo(map); }
+function openPopup(ll,html){ if (popup) popup.remove(); popup=new maplibregl.Popup({maxWidth:"290px"}).setLngLat(ll).setHTML(html).addTo(map);
+  if (html.includes('class="wbox"')) requestAnimationFrame(()=>fitPopup(popup)); }
+function fitPopup(p){ if (!p||!p.isOpen()) return; const r=p.getElement().getBoundingClientRect(), m=map.getContainer().getBoundingClientRect(), tb=$("#tools").getBoundingClientRect();
+  const top=Math.max(m.top,tb.bottom)+6, bot=m.bottom-8, dx=r.left<m.left+6?r.left-m.left-6:r.right>m.right-6?r.right-m.right+6:0;
+  const dy=r.height>bot-top?r.top-top:r.bottom>bot?r.bottom-bot:r.top<top?r.top-top:0;
+  if (dx||dy) map.panBy([dx,dy],{duration:250}); }
 function snap(pt){
   if (!st.T) return null; let best=null, bd=14*14;
   const test=(lng,lat,label)=>{ const p=map.project([lng,lat]), d=(p.x-pt.x)**2+(p.y-pt.y)**2; if(d<bd){bd=d;best={c:[lng,lat],label};} };
@@ -1678,7 +1847,8 @@ function wireMap(){
   map.on("mousemove",e=>{ lastEv=e; if(rafQ) return; rafQ=true; requestAnimationFrame(()=>{ rafQ=false; onMove(lastEv); }); });
   map.on("mouseout",()=>{ $("#maptip").hidden=true; clearHover(); });
   map.on("click",onClick);
-  map.on("dblclick",e=>{ if(st.mode==="poly"){ e.preventDefault(); finishPoly(clickHow(e.originalEvent)); }
+  map.on("dblclick",e=>{ if(st.mode==="pline"){ e.preventDefault(); return finishPLine(); }
+    if(st.mode==="poly"){ e.preventDefault(); finishPoly(clickHow(e.originalEvent)); }
     else if (st.mode==="measure"){ e.preventDefault(); while (meas.pts.length>1&&geoDist(meas.pts[meas.pts.length-1],meas.pts[meas.pts.length-2])<0.5) meas.pts.pop(); meas.done=true; drawMeas(); } });
 }
 function subAt(point){ const L=["sub-st","sub-ost","sub-ent"].filter(l=>map.getLayer(l)&&map.getLayoutProperty(l,"visibility")!=="none");
@@ -1702,6 +1872,10 @@ function lineTip(point){
 function onMove(e){
   const p=[e.lngLat.lng,e.lngLat.lat];
   if (st.mode==="measure"){ $("#maptip").hidden=true; if (meas.pts.length&&!meas.done) drawMeas(p); return; }
+  if (st.mode==="pline"){ const sn=snap(e.point), n=(st.draft||[]).length; drawPLines(sn?sn.c:p);
+    tipAt(e.point,`${sn?`Snap to <b>${esc(sn.label)}</b><br>`:""}Click to add station ${n+1}${n>1?"; double-click or Enter to finish":""}`); return; }
+  { const pf=map.getLayer("pl-st")?map.queryRenderedFeatures([[e.point.x-6,e.point.y-6],[e.point.x+6,e.point.y+6]],{layers:["pl-st"]}):[];
+    if (pf.length&&st.mode!=="poly"&&st.mode!=="radius"){ const q=pStop(pf[0].properties.id); map.getCanvas().style.cursor="pointer"; clearHover(); tipAt(e.point,`<b>${esc(q.name)}</b> <span class="pp" style="background:${q.line.color}">${esc(q.line.name)}</span><br>Proposed station. Click for walksheds`); return; } }
   if (st.mode==="poly"){ if(!drawPts.length) return; map.getSource("draw").setData(drawFC(p));
     if (drawPts.length>1){ const r=selIndices(st.P,{type:"poly",ring:[...drawPts,p,drawPts[0]],clip:st.clip},true); tipAt(e.point,`${r.provisional?"About ":""}${fmt(r.length)} lots ${CLIP_PHRASE[st.clip]}`); } return; }
   if (st.mode==="radius"){ const sn=radiusC?null:snap(e.point), c=radiusC||(st.radiusPreset?(sn?sn.c:p):null);
@@ -1715,7 +1889,9 @@ function onMove(e){
     else if (f.layer.id==="sub-ost"){ const s=st.T.other[f.properties.k]; tipAt(e.point,`<b>${esc(s.name)}</b> <span class="tipln">${netPills(s)}</span>Click for a radius`); }
     else { const en=st.T.entrances[f.properties.k]; tipAt(e.point,`<b>${esc(en.type)}</b><br>${esc(st.T.byId.get(en.sid).name)}`); }
     return; }
-  const lt=lineTip(e.point)+zoneTip(e.point), bare=()=>{ if (lt) tipAt(e.point,lt); else $("#maptip").hidden=true; };
+  const bs=busStopAt(e.point);
+  if (bs.length){ const s=st.B.stops[bs[0].properties.k]; map.getCanvas().style.cursor="pointer"; clearHover(); if (popup&&popup.isOpen()&&busOpen===bs[0].properties.k){ $("#maptip").hidden=true; return; } tipAt(e.point,`<b>${esc(s[2])}</b><div class="tipbus">${s[3].slice(0,8).map(i=>busPill(st.B.routes[i])).join(" ")}${s[3].length>8?" …":""}</div>Click for a radius`); return; }
+  const lt=lineTip(e.point)+busTip(e.point)+zoneTip(e.point), bare=()=>{ if (lt) tipAt(e.point,lt); else $("#maptip").hidden=true; };
   if (st.mode==="lot"||st.mode==="block"||st.mode==="view"){
     const low=map.getZoom()<lotZ();
     if (st.mode==="block"||low){
@@ -1812,6 +1988,9 @@ function mergeInto(sel){
 function onClick(e){
   const p=[e.lngLat.lng,e.lngLat.lat];
   if (st.mode==="measure"){ if (meas.done){ meas.pts=[]; meas.done=false; } meas.pts.push(p); return drawMeas(); }
+  if (st.mode==="pline"){ const sn=snap(e.point), d=st.draft||(st.draft=[]), q=sn?sn.c:p;
+    if (d.length&&Math.hypot(...(([a,b])=>[a.x-b.x,a.y-b.y])([map.project(d[d.length-1]),e.point]))<6) return;
+    d.push([+q[0].toFixed(6),+q[1].toFixed(6),sn?sn.label.replace(/^an entrance to /,"").replace(/[~;,]/g," "):`Station ${d.length+1}`]); return drawPLines(); }
   const oe=e.originalEvent||{};
   const how=clickHow(oe);
   if (how==="out"&&st.sels.length&&st.mode!=="poly"&&st.mode!=="radius"&&map.getZoom()>=lotZ()){ const f=map.queryRenderedFeatures(e.point,{layers:["lots"]}); if (f.length) return toggleExclude(Math.round(st.P.bbl[f[0].id])); }
@@ -1823,8 +2002,11 @@ function onClick(e){
     if (!radiusC){ radiusC=c; radiusC.label=sn&&sn.label; return; }
     const m=distM(radiusC,p); if (m<20) return;
     return finish({type:"radius",c:[radiusC[0],radiusC[1]],m:Math.round(m),label:radiusC.label?`Within ${miles(m)} of ${radiusC.label}`:undefined,clip:st.clip},how); }
+  const pf=map.getLayer("pl-st")?map.queryRenderedFeatures([[e.point.x-6,e.point.y-6],[e.point.x+6,e.point.y+6]],{layers:["pl-st"]}):[];
+  if (pf.length) return plStopPopup(pf[0].properties.id);
   const sf=subAt(e.point);
   if (sf.length){ const f=sf[0]; return f.layer.id==="sub-st"?stationPopup(f.properties.k):f.layer.id==="sub-ost"?otherPopup(f.properties.k):entrancePopup(f.properties.k); }
+  const bf=busStopAt(e.point); if (bf.length) return busPopup(bf[0].properties.k);
   if (st.mode==="view"&&!st.map.fill){ const items=zoneItems(e.point); if (items.length){ const f=map.getZoom()>=lotZ()?map.queryRenderedFeatures(e.point,{layers:["lots"]}):[], bbl=f.length?Math.round(st.P.bbl[f[0].id]):null;
     st.peek=null; setPeekState(bbl==null?null:st.P.bblIdx.get(bbl)); st.zpeek={items,bbl}; renderProfile(); return; } }
   if ((st.mode==="view"||st.mode==="lot") && map.getZoom()<lotZ()){
@@ -1848,9 +2030,11 @@ function finish(sel,how){ const stay=st.mode==="radius"&&(st.addMode||how==="new
 
 function nextColor(){ const used=new Set(st.sels.map(e=>e.color)); return SEL_COLORS.find(c=>!used.has(c))||SEL_COLORS[st.sels.length%SEL_COLORS.length]; }
 const curIndex=()=>st.sels.length===1?0:typeof st.view==="number"?st.view:st.sels.length-1;
-const needsT=sel=>sel&&(sel.type==="walk"||(sel.type==="group"&&sel.parts.some(needsT)));
+const needsT=sel=>sel&&(sel.type==="walk"||(sel.type==="group"&&(sel.parts.some(needsT)||(sel.minus||[]).some(needsT))));
 function select(sel, fit, o={}){
   st.zpeek=null;
+  if (sel && !o.edit && st.addTo==null && (o.add||(o.map&&st.addMode))){ const e=encSel(sel);
+    if (st.sels.some(x=>encSel(x.sel)===e)){ if (popup) popup.remove(); toast(`${selTitle(st.P,sel,0)[0]} is already selected.`); return; } }
   if (needsT(sel) && !st.T){ const next=o.add||(o.map&&st.addMode)?[...st.sels,{sel,color:nextColor()}]:[{sel,color:SEL_COLORS[0]}];
     st.pending={sels:next.map(e=>e.sel),view:next.length>1?"all":0}; return; }
   if (!o.keepPrev) st.prevSel=null;
@@ -1945,20 +2129,22 @@ async function getZoningFile(rel){
 async function setCompare(id){ st.C=id?await getPack(id):null; renderTrack(); renderProfile(); writeHash(); }
 
 function writeHash(){
-  const q=new URLSearchParams(); q.set("v",st.P.id); if (st.peek!=null) q.set("lot",st.peek); if(st.C) q.set("c",st.C.id); if(st.colorBy!=="lu") q.set("m",st.colorBy); if(!st.map.fill) q.set("lay","zoning");
+  const q=new URLSearchParams(); q.set("v",st.P.id); if (st.peek!=null) q.set("lot",st.peek); if(st.C) q.set("c",st.C.id); if(st.colorBy!=="lu") q.set("m",st.colorBy); if(!st.map.fill) q.set("lay","zoning"); if (st.opts.park!=="whole") q.set("pk",st.opts.park);
+  for (const L of st.lines) q.append("ln",encLine(L));
   for (const {sel:s} of st.sels) q.append("s", encSel(s));
   if (st.sels.length>1 && st.view!=="all") q.set("view",st.view);
   history.replaceState(null,"","#"+q.toString());
 }
 function encSel(s){
-  if (s.type==="group") return "g:"+s.parts.map(encSel).join("~");
+  if (s.type==="group") return "g:"+s.parts.map(encSel).join("~")+(s.minus||[]).map(x=>"~-"+encSel(x)).join("")+(s.name?"~="+s.name.replace(/[~&#]/g," "):"");
   return (s.type==="area"?`a:${s.kind}:${s.code}`: s.type==="lots"?"l:"+s.bbls.join(","): s.type==="blocks"?"k:"+s.keys.join(","):
     (s.type==="walk"?`w:${s.sid},${Math.round(s.m)}`: s.type==="radius"?`r:${s.c[0].toFixed(6)},${s.c[1].toFixed(6)},${Math.round(s.m)}`:"p:"+s.ring.slice(0,-1).map(p=>p.join(",")).join(";"))
       +(s.clip?"!"+CLIP_CODE[s.clip]:""))+(s.excl&&s.excl.length?"^"+s.excl.join(","):"");
 }
 function parseSel(s){
   const h=s.lastIndexOf("^"); if (h>=0){ const ex=s.slice(h+1).split(",").map(Number).filter(Boolean), o=parseSel(s.slice(0,h)); if (o&&ex.length) o.excl=ex; return o; }
-  if (s.startsWith("g:")){ const parts=s.slice(2).split("~").map(parseSel).filter(Boolean); return parts.length?{type:"group",parts}:null; }
+  if (s.startsWith("g:")){ const bits=s.slice(2).split("~"), nm=bits.find(b=>b[0]==="="), parts=bits.filter(b=>!/^[-=]/.test(b)).map(parseSel).filter(Boolean), minus=bits.filter(b=>b[0]==="-").map(b=>parseSel(b.slice(1))).filter(Boolean);
+    if (!parts.length) return null; const g={type:"group",parts}; if (minus.length) g.minus=minus; if (nm) g.name=nm.slice(1); return g; }
   const t=s.slice(0,1); let rest=s.slice(2), clip;
   const bang=rest.lastIndexOf("!"); if (bang>=0){ clip=CLIP_FROM[rest.slice(bang+1)]; rest=rest.slice(0,bang); }
   const c=o=>(clip&&(o.clip=clip),o);
@@ -1974,7 +2160,7 @@ function parseSel(s){
 }
 function readHash(){
   const q=new URLSearchParams(location.hash.slice(1)), v=q.get("view");
-  return {v:q.get("v"),c:q.get("c"),m:q.get("m"),lay:q.get("lay"),lot:q.get("lot"),sels:q.getAll("s").map(parseSel).filter(Boolean),view:v==null?"all":/^\d+$/.test(v)?+v:v};
+  return {lines:q.getAll("ln").map(parseLine).filter(Boolean),pk:q.get("pk"),v:q.get("v"),c:q.get("c"),m:q.get("m"),lay:q.get("lay"),lot:q.get("lot"),sels:q.getAll("s").map(parseSel).filter(Boolean),view:v==null?"all":/^\d+$/.test(v)?+v:v};
 }
 
 function showTip(x,y,html){ const t=$("#tip"); t.innerHTML=html; t.hidden=false;
@@ -2011,14 +2197,14 @@ function wirePanel(){
     const ob=e.target.closest("#profile [data-onlyboro]"); if (ob){ const v=ob.dataset.onlyboro; st.opts.boroExcl=new Set(v==="all"?[]:Object.keys(BORO).map(Number).filter(b=>b!==+v));
       $$("#boroFilter input").forEach(x=>{ x.checked=!st.opts.boroExcl.has(+x.dataset.boro); x.closest("label").classList.toggle("off",!x.checked); }); return renderProfile(); }
     const ct=e.target.closest("#profile [data-clipto]"); if (ct) return applyClip(ct.dataset.clipto);
+    const pt=e.target.closest("#profile [data-parkto]"); if (pt) return setPark(pt.dataset.parkto);
     const so=e.target.closest("#profile [data-sort]"); if (so){ const [k,m]=so.dataset.sort.split(":"); st.opts.sort[k]=st.opts.sort[k]===m?"std":m; return renderProfile(); }
     const fo=e.target.closest("#profile [data-fold]"); if (fo){ const k=fo.dataset.fold, sec=fo.closest(".blk"), shut=!st.opts.shut.has(k);
       shut?st.opts.shut.add(k):st.opts.shut.delete(k); sec.classList.toggle("shut",shut); fo.setAttribute("aria-expanded",String(!shut)); fo.title=(shut?"Show":"Hide")+" this section"; return; }
     const rm=e.target.closest("#profile [data-x]"); if (rm){ e.stopPropagation(); return removeSel(+rm.dataset.x); }
     const x=e.target.closest("[data-export]"); if (x) return openExport("section",x.dataset.export);
     const l=e.target.closest("[data-lot]"); if (l) return openLot(+l.dataset.lot);
-    const own=e.target.closest("[data-showowner]"); if (own){ st.ownerShown.add(+own.dataset.showowner); return renderProfile(); }
-    const cb=e.target.closest("[data-copybbl]"); if (cb){ navigator.clipboard&&navigator.clipboard.writeText(cb.dataset.copybbl).then(()=>{ cb.textContent="Copied"; setTimeout(()=>cb.textContent="Copy",1400); }); return; }
+    const own=e.target.closest("[data-showowner]"); if (own){ st.ownerShown.add(+own.dataset.showowner); return renderProfile(); }    const cb=e.target.closest("[data-copybbl]"); if (cb){ navigator.clipboard&&navigator.clipboard.writeText(cb.dataset.copybbl).then(()=>{ cb.textContent="Copied"; setTimeout(()=>cb.textContent="Copy",1400); }); return; }
     const xl=e.target.closest("[data-exlot]"); if (xl){ toggleExclude(+xl.dataset.exlot); return; }
     const zl=e.target.closest("[data-zlot]"); if (zl) return peekLot(+zl.dataset.zlot);
     const zj=e.target.closest("[data-zjump]"); if (zj){ const c=document.getElementById("zc"+zj.dataset.zjump); if (c) c.scrollIntoView({behavior:"smooth",block:"start"}); return; }
@@ -2081,8 +2267,23 @@ function wireOptions(){
   $("#swatches").addEventListener("change",e=>{ const t=e.target;
     if (t.matches("[data-col]")){ const v=st.colorBy, i=t.dataset.col, c=t.value; setColors(C=>{ (C.custom[v]=C.custom[v]||{})[i]=c; }); }
     else if (t.id==="palSel"){ const v=st.colorBy; setColors(C=>{ C.scheme[v]=t.value; delete C.custom[v]; }); } });
-  $("#swatches").addEventListener("click",e=>{ const r=e.target.closest("[data-resetcol]"); if (r){ e.stopPropagation(); const v=r.dataset.resetcol; setColors(C=>{ delete C.custom[v]; delete C.scheme[v]; }); } },true);
-  $("#swatches").onclick=e=>{ if (e.target.closest(".pick,#palSel,.palrow,[data-resetcol]")) return; const d=e.target.closest("[data-c]"); if(!d) return; const H=st.map.hidden[st.colorBy], c=+d.dataset.c; H.has(c)?H.delete(c):H.add(c); restyleLots(); };
+  $("#swatches").addEventListener("click",e=>{ if (e.shiftKey&&e.target.closest(".pick")) e.preventDefault(); const r=e.target.closest("[data-resetcol]"); if (r){ e.stopPropagation(); const v=r.dataset.resetcol; setColors(C=>{ delete C.custom[v]; delete C.scheme[v]; }); } },true);
+  $("#swatches").onclick=e=>{ if (e.target.closest("#palSel,.palrow,[data-resetcol]")||(!e.shiftKey&&e.target.closest(".pick"))) return;
+    const ub=e.target.closest("[data-ubedit],[data-ubdel],[data-ubadd],[data-ubdone],[data-ubreset]");
+    if (ub){ const d=ub.dataset, div=[...st.map.ubDiv], G=ubGroups();
+      if ("ubedit" in d){ st.ubEdit=true; return renderLegend(); }
+      if ("ubdone" in d){ st.ubEdit=false; return renderLegend(); }
+      if ("ubreset" in d) return setUbDiv([...UB_DIV0]);
+      if ("ubadd" in d){ const b=+$("#ubSplit").value; div[b-1]=true; return setUbDiv(div); }
+      if ("ubdel" in d){ const k=+d.ubdel; if (G.length<2) return; const b=k?G[k][0]:G[1][0]; div[b-1]=false; return setUbDiv(div); } }
+    const d=e.target.closest("[data-c]"); if(!d) return; const H=st.map.hidden[st.colorBy], c=+d.dataset.c;
+    const grp=k=>st.colorBy==="ub"&&k<9?(ubGroups().find(g=>g[0]===k)||[k]):[k], cs=grp(c);
+    if (e.shiftKey){ const rest=$$("#swatches [data-c]").map(x=>+x.dataset.c).filter(k=>k!==c), solo=!H.has(c)&&rest.every(k=>H.has(k));
+      H.clear(); if (!solo) rest.forEach(k=>grp(k).forEach(x=>H.add(x))); return restyleLots(); }
+    const on=H.has(c); cs.forEach(x=>on?H.delete(x):H.add(x)); restyleLots(); };
+  $("#swatches").addEventListener("change",e=>{ if (e.target.id==="ubSplit") st.ubSplit=+e.target.value; const t=e.target.closest("[data-ubfrom]"); if (!t) return;
+    const G=ubGroups(), k=+t.dataset.ubfrom, div=[...st.map.ubDiv]; div[G[k][0]-1]=false; div[+t.value-1]=true; setUbDiv(div); });
+  $("#lotOn").onchange=e=>{ st.map.colorsOff=!e.target.checked; setFillOpacity(); renderLegend(); };
   const setRange=()=>{ const a=parseFloat($("#rMin").value), b=parseFloat($("#rMax").value); if (Number.isFinite(a)&&Number.isFinite(b)&&b>a){ st.map.range[st.colorBy]=[a,b]; restyleLots(); } };
   $("#rMin").onchange=setRange; $("#rMax").onchange=setRange;
   $("#rAuto").onclick=()=>{ if (RANGE_DEFAULT[st.colorBy]) st.map.range[st.colorBy]=[...RANGE_DEFAULT[st.colorBy]]; else delete st.map.range[st.colorBy]; restyleLots(); };
@@ -2090,6 +2291,7 @@ function wireOptions(){
   $$("[data-opt]").forEach(cb=>cb.onchange=()=>{ const o=cb.dataset.opt; st.map[o]=cb.checked; $$(`[data-opt="${o}"]`).forEach(x=>x.checked=cb.checked);
     if (o==="tracts") clearHover(); if (o==="dim") applyFade(); if (o==="fill"){ setFillOpacity(); renderLegend(); } applyMapOpts(); });
   $$("[data-sub]").forEach(cb=>cb.onchange=()=>{ st.map.sub[cb.dataset.sub]=cb.checked; applyMapOpts(); });
+  $$("[data-bus]").forEach(cb=>cb.onchange=()=>{ st.map.bus[cb.dataset.bus]=cb.checked; applyMapOpts(); if (cb.checked) loadBus(); });
   $("#ovlChecks").innerHTML=st.overlayFile?OVL.map(([k,t,c])=>`<label><input type="checkbox" data-zon="${k}"> <i class="zk" style="${k==="ed"?`background:${c};border-radius:50%;width:8px;height:8px;margin:0 7px 0 4px`:k==="tz"?`background:linear-gradient(90deg,${Object.values(TZ_COLORS).join(",")})`:`background:${c}55;border:1.5px solid ${c}`}"></i>${t}</label>`).join(""):"";
   $$("[data-zon]").forEach(cb=>cb.onchange=()=>{ st.map.zon[cb.dataset.zon]=cb.checked; if (cb.dataset.zon==="zd") st.map.zdAuto=false; applyMapOpts(); });
   $("#layerMode").onclick=e=>{ const b=e.target.closest("[data-lm]"); if (b) setLayerMode(b.dataset.lm); };
@@ -2111,6 +2313,7 @@ async function hiResMap(k){
   const dpr=devicePixelRatio||1; if (k<=dpr||typeof map.setPixelRatio!=="function") return exp.shot;
   map.setPixelRatio(k); await new Promise(r=>map.once("idle",r)); const shot=await grabMap(); map.setPixelRatio(dpr); return shot; }
 function legendItems(){
+  if (st.map.colorsOff&&st.map.fill) return null;
   const ramp=$("#swatches .ramp");
   if (ramp) return {ramp:(getComputedStyle(ramp).backgroundImage.match(/rgba?\([^)]+\)/g)||[]), labels:[...$$("#swatches .rl span")].map(e=>e.textContent)};
   return {items:[...$("#swatches").querySelectorAll(":scope > div")].filter(d=>d.querySelector("i,.pick")&&!d.classList.contains("hid")).map(d=>[getComputedStyle(d.querySelector("i,.pick")).backgroundColor,d.textContent.trim()])}; }
@@ -2327,7 +2530,7 @@ async function boot(){
     const h=readHash(), want=st.releases.find(r=>r.id===h.v)||st.releases[st.releases.length-1];
     st.P=await getPack(want.id);
     if (h.c&&h.c!==want.id&&st.releases.some(r=>r.id===h.c)) st.C=await getPack(h.c);
-    if (h.m&&h.m!=="zn") st.colorBy=h.m;
+    if (h.m&&h.m!=="zn") st.colorBy=h.m; if (PARK_NAME[h.pk]) st.opts.park=h.pk; st.lines=h.lines;
     buildColorBy();
     st.zoningFile=await getZoningFile(want); st.overlayFile=window.__LP__?null:await getOverlayFile();
     if (innerWidth<=820) $("#legend").open=false;
@@ -2352,35 +2555,42 @@ async function boot(){
       if (all&&all.checked&&clipTargets().length) applyClip(v); else toast(`Lot inclusion: ${CLIP_NAME[v].toLowerCase()}.`);
       if (st.mode==="radius"||st.mode==="poly") setMode(st.mode); };
     document.addEventListener("click",e=>{ if (!cm.hidden && !e.target.closest("#clipMenu,#clipBtn")){ cm.hidden=true; cb.setAttribute("aria-expanded","false"); } });
-    $("#clipRow").onchange=e=>{ if (e.target.matches("[data-clip]") && e.target.value) applyClip(e.target.value); };
+    $("#clipRow").onchange=e=>{ if (e.target.matches("[data-clip]") && e.target.value) applyClip(e.target.value); if (e.target.matches("[data-park]")) setPark(e.target.value); };
+    $("#clipRow").onclick=e=>{ if (e.target.closest("[data-parkinfo]")){ st.parkInfo=!st.parkInfo; renderClipRow(); } };
     $("#track").onclick=e=>{ const b=e.target.closest("[data-rel]"); if(b) switchRelease(b.dataset.rel); };
     $("#cmp").onchange=e=>setCompare(e.target.value);
-    document.addEventListener("click",e=>{ const w=e.target.closest("[data-walk]"), en=e.target.closest("[data-ent]"), rt=e.target.closest("[data-route]"), how=clickHow(e)==="out"?null:clickHow(e);
-      if (w) applyHow({type:"walk",sid:w.dataset.walk,m:+w.dataset.m,clip:st.clip},how,true);
-      const orad=e.target.closest("[data-orad]"); if (orad){ const x=st.T.other[+orad.dataset.orad], m=+orad.dataset.m;
-        applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of ${x.name} (${netLabel(x)})`,clip:st.clip},how,true); }
-      if (en){ const x=st.T.entrances[+en.dataset.ent], s=st.T.byId.get(x.sid), m=+en.dataset.m;
-        applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of an entrance to ${s.name}`,clip:st.clip},how,true); }
-      const ort=e.target.closest("[data-oroute]");
-      if (rt||ort){ const r=(rt||ort).dataset.route||ort.dataset.oroute, [[x0,y0],[x1,y1]]=st.P.bbox, pad=0.012, inb=s=>s.lng>x0-pad&&s.lng<x1+pad&&s.lat>y0-pad&&s.lat<y1+pad;
-        const near=rt?st.T.stations.filter(s=>s.routes.includes(r)&&inb(s)).map(s=>s.id)
-          :st.T.other.map((s,k)=>[s,k]).filter(([s])=>s.net===ort.dataset.net&&(s.routes||[]).includes(r)&&inb(s)).map(([,k])=>"o"+k);
-        if (!near.length) return;
-        const walks=[...new Set(near)].map(sid=>({type:"walk",sid,m:804.7,clip:st.clip}));
-        if (popup) popup.remove();
-        if (st.addTo!=null && st.sels[st.addTo]){ pushUndo(); const k=st.addTo, g=st.sels[k]; st.sels[k]={...g,sel:{...g.sel,parts:[...g.sel.parts,...walks]}}; st.view=st.sels.length>1?k:0; drawSelection(); renderProfile(); writeHash(); return; }
-        const grp={type:"group",parts:walks};
-        if (how==="merge"&&st.sels.length) return applyHow(grp,how,true);
-        const keep=(st.addMode||how==="new")?st.sels.map(x=>x.sel):[];
-        restore(keep.concat([grp]),keep.length?keep.length:0,true,true); } });
+    document.addEventListener("click",e=>{ const ws=e.target.closest(".wbox .wseg button");
+      if (ws&&!ws.disabled){ const box=ws.closest(".wbox"), k=ws.closest("[data-wset]").dataset.wset;
+        ws.parentNode.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b===ws)); box.dataset[k]=ws.dataset.v; st.walk[k]=k==="m"?+ws.dataset.v:ws.dataset.v;
+        if (k==="m"){ const c=box.querySelector(".wcust"); c.classList.remove("on"); c.querySelector("input").value=""; } return; }
+      const go=e.target.closest("[data-wgo],[data-went],[data-wline],[data-wbus]"); if (!go) return;
+      const how=clickHow(e)==="out"?null:clickHow(e), {from,m}=walkFrom(go);
+      if (go.dataset.wbus!=null){ const x=st.B.stops[+go.dataset.wbus];
+        return applyHow({type:"radius",c:[x[0],x[1]],m,label:`Within ${miles(m)} of the ${x[2]} bus stop`,clip:st.clip},how,true); }
+      if (go.dataset.went!=null){ const x=st.T.entrances[+go.dataset.went], s=st.T.byId.get(x.sid);
+        return applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of an entrance to ${s.name}`,clip:st.clip},how,true); }
+      if (go.dataset.wgo){ const sel=stationSel(go.dataset.wgo,m,go.dataset.wfrom||from); if (sel) applyHow(sel,how,true); return; }
+      const pl=go.dataset.wline[0]==="#"?+go.dataset.wline.slice(1):null;
+      const grp=pl!=null?plineSel(pl,m,go.dataset.wnew!=null):lineSel(go.dataset.wline,go.dataset.net,m,from); if (!grp) return toast(pl!=null&&!st.T?"Subway data is still loading.":"No stations on that line are near the loaded lots.");
+      if (popup) popup.remove();
+      if (st.addTo!=null && st.sels[st.addTo]){ pushUndo(); const k=st.addTo, g=st.sels[k]; st.sels[k]={...g,sel:{...g.sel,parts:[...g.sel.parts,...grp.parts]}}; st.view=st.sels.length>1?k:0; drawSelection(); renderProfile(); writeHash(); return; }
+      if (how==="merge"&&st.sels.length) return applyHow(grp,how,true);
+      const keep=(st.addMode||how==="new")?st.sels.map(x=>x.sel):[];
+      restore(keep.concat([grp]),keep.length?keep.length:0,true,true); });
+    document.addEventListener("input",e=>{ const t=e.target; if (!t.matches(".wcust input")) return; const box=t.closest(".wbox"), v=parseFloat(t.value);
+      if (!(v>=0.05&&v<=3)) return; const m=+(v*1609.344).toFixed(1); box.dataset.m=m; st.walk.m=m; t.parentNode.classList.add("on");
+      box.querySelectorAll('[data-wset="m"] button').forEach(b=>b.classList.remove("on")); });
+    document.addEventListener("keydown",e=>{ if (e.key==="Enter"&&e.target.matches(".wcust input")){ e.preventDefault(); const b=e.target.closest(".wbox").querySelector(".wgo"); if (b) b.click(); } });
     $("#addBtn").onclick=()=>toggleAdd();
+    wirePLines();
     $("#tapMode").onchange=e=>setTapMode(e.target.value);
     $("#satBtn").onclick=()=>{ st.map.basemap=st.map.basemap==="sat"?"map":"sat"; applyMapOpts(); };
     $("#basemap").onchange=e=>{ st.map.basemap=e.target.value; applyMapOpts(); };
     addEventListener("keydown",e=>{ if (e.target.matches("input,select,textarea")) return;
       if ((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==="z"||e.key.toLowerCase()==="y")){ e.preventDefault();
         return (e.key.toLowerCase()==="y"||e.shiftKey) ? redo() : undo(); }
-      if (e.key==="Escape"){ if(st.mode==="poly"||st.mode==="radius"||st.mode==="measure") setMode("view"); else if(popup) popup.remove(); else if (st.peek!=null) peekLot(null); }
+      if (st.mode==="pline"&&(e.key==="Enter"||e.key==="Backspace")){ e.preventDefault(); if (e.key==="Enter") finishPLine(); else if (st.draft&&st.draft.length){ st.draft.pop(); drawPLines(); } return; }
+      if (e.key==="Escape"){ if(st.mode==="poly"||st.mode==="radius"||st.mode==="measure"||st.mode==="pline") setMode("view"); else if(popup) popup.remove(); else if (st.peek!=null) peekLot(null); }
       else if (e.key==="Enter"&&st.mode==="poly") finishPoly(clickHow(e));
       else if (e.key==="Enter"&&st.mode==="measure"){ meas.done=true; drawMeas(); }
       else if ((e.key==="["||e.key==="]") && st.sels.length>1){ const seq=["all","cmp",...st.sels.map((_,k)=>k)], at=seq.indexOf(st.view); setView(seq[(at+(e.key==="]"?1:seq.length-1))%seq.length]); }

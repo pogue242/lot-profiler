@@ -22,6 +22,8 @@ idx = json.load(open(os.path.join(ROOT, "data", "transit_index.json")))
 used = {r.get("transit") for r in keep} - {None}
 idx["snapshots"] = [s for s in idx["snapshots"] if not used or s["file"] in used]
 extra["transitIndex"] = idx
+bus_idx = os.path.join(ROOT, "data", "bus_index.json")
+if os.path.exists(bus_idx): extra["bus"] = json.load(open(os.path.join(ROOT, "data", json.load(open(bus_idx))["file"]), encoding="utf-8"))
 extra["transitFiles"] = {s["file"]: json.load(open(os.path.join(ROOT, "data", s["file"]), encoding="utf-8")) for s in idx["snapshots"]}
 if a.zoning and os.path.exists(os.path.join(ROOT, "data", "zoning_index.json")):
     zi = json.load(open(os.path.join(ROOT, "data", "zoning_index.json"))); zi["snapshots"] = zi["snapshots"][-1:]
