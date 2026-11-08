@@ -177,10 +177,12 @@ button,select,input{font:inherit;color:inherit}
 .rrow input[type=number]{width:52px;padding:3px 4px;border:1px solid var(--hair);border-radius:3px}
 .rrow select{padding:3px 4px;border:1px solid var(--hair);border-radius:3px;background:#fff}
 .mini{border:1px solid var(--hair);background:#fff;border-radius:3px;padding:2px 7px;font-size:11.5px;cursor:pointer;color:var(--blue)}
-#mapOpts{border-top:1px solid var(--hair);padding-top:7px}
-#mapOpts summary{font-weight:700;font-size:12px;cursor:pointer;color:var(--ink)}
-#mapOpts[open] summary{margin-bottom:7px}
-#mapOpts .ol{margin:9px 0 4px}
+#mapOpts,#trOpts{border-top:1px solid var(--hair);padding-top:7px}
+#trOpts{margin-bottom:6px}
+#mapOpts summary,#trOpts summary{font-weight:700;font-size:12px;cursor:pointer;color:var(--ink)}
+#mapOpts[open] summary,#trOpts[open] summary{margin-bottom:7px}
+#mapOpts .ol,#trOpts .ol{margin:9px 0 4px}
+#trOpts summary+.ol{margin-top:0}
 .checks{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:12px}
 .checks label{display:flex;align-items:center;gap:5px;cursor:pointer}
 .checks input,.slider input{accent-color:var(--blue)}
@@ -610,3 +612,19 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .stpop .brts>div{display:flex;gap:6px;align-items:flex-start}
 .tipbus{margin:2px 0;display:grid;gap:2px}
 #busStatus:empty{display:none}
+.lotrec .lotids{margin-top:4px}
+.lotrec .tiles{gap:12px 18px;margin:14px 0 4px}
+.lotrec .lotlinks{gap:6px;margin-top:14px}
+.lotrec .lotlinks a,.lotrec .lotlinks button{border:0;border-radius:14px;padding:5px 11px;background:var(--tint);color:var(--blue);font-size:12.5px}
+.lotrec .lotlinks a:first-child{background:var(--tint);color:var(--blue)}
+.lotrec .lotlinks a::after{content:"↗";font-size:10.5px;margin-left:4px;opacity:.7}
+.lotrec .lotlinks a:hover,.lotrec .lotlinks a:first-child:hover,.lotrec .lotlinks button:hover{background:var(--band)}
+.lotrec .lotlinks button{box-shadow:inset 0 0 0 1px var(--blue);background:#fff}
+.lotrec .blk{margin-top:20px}
+.lotrec .blk>h2{border-bottom:0;padding-bottom:0;margin-bottom:4px}
+.lotrec .kv{margin-top:0;row-gap:0}
+.lotrec .kv span,.lotrec .kv b{border-bottom:0;padding:4px 0}
+.lotrec .kv b{font-weight:600}
+.lotrec .kv b.nil{color:var(--ink2);font-weight:400}
+.lotrec .lgrp{border-bottom:0;padding:4px 0}
+@media (hover:hover){ .lotrec .blk>h2 .xbtn{opacity:0;transition:opacity .15s} .lotrec .blk>h2:hover .xbtn,.lotrec .blk>h2 .xbtn:focus-visible{opacity:1} }

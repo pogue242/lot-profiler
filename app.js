@@ -74,6 +74,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const fmt = (v,d=0) => v==null||Number.isNaN(v)||v===""? "—" : (+v).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmt1 = v => v==null||v===""? "—" : (+v).toLocaleString("en-US",{maximumFractionDigits:1});
+const fmtFl = v => v==null||v===""? "—" : (+v).toLocaleString("en-US",{maximumFractionDigits:2});
 const pct = (a,b) => b ? a/b*100 : 0;
 const pctT = v => v==null||Number.isNaN(v) ? "—" : fmt(v,1)+"%";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
@@ -82,7 +83,7 @@ const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="bac
 const st = {
   releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
   walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
-  opts:{park:"whole", style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
+  opts:{park:"whole", style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
         order:["lu","ub","fl","fc","age","zone","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
@@ -707,7 +708,8 @@ function tableHTML(headers, rows, key){
   return `<div class="rows"><div class="r hd" style="${cols}"><span></span>${hb(headers[0],"az","nm")}${headers.slice(1).map((h,k)=>hb(h,["lots","area","units"][k],"val")).join("")}</div>`+
     rows.map(r=>`<div class="r${r.hid?" off":""}" style="${cols}"${key?` data-hidecat="${key}" data-name="${esc(r[1])}" title="${r.hid?"Click to put this back in the chart":"Click to leave this out of this chart (the rest recalculate)"}"`:""} data-k="${esc(r[1])}" data-p="${r[2]==null?"":r[2].toFixed(1)}" data-v="" data-m="${esc(headers[1]).toLowerCase().replace("%","of")}"><span class="sw" style="background:${r[0]}"></span><span class="nm">${esc(r[1])}</span>${r.slice(2).map(v=>`<span class="val">${v==null?"":fmt(v,1)+"%"}</span>`).join("")}</div>`).join("")+`</div>`;
 }
-const kvHTML=pairs=>`<div class="kv">${pairs.map(([k,v])=>`<span>${k}</span><b>${v}</b>`).join("")}</div>`;
+const NIL=/^(None|—|No|[—\s\/]+)$/;
+const kvHTML=pairs=>`<div class="kv">${pairs.map(([k,v])=>{ const n=NIL.test(String(v).trim())?" class=\"nil\"":""; return `<span${n}>${k}</span><b${n}>${v}</b>`; }).join("")}</div>`;
 function sectionSpecs(S){
   const P=st.P, acres=v=>fmt(v/43560,1)+" acres", specs={};
   const luRows=[]; let oL=0,oA=0,oU=0; const order=[...Array(12).keys()];
@@ -828,7 +830,7 @@ function lotSpecs(i){
     ["Lot frontage × depth",!R?wait:`${fmt1(g("LotFront"))} × ${fmt1(g("LotDepth"))} ft`],["Buildings on lot",!R?wait:fmt(g("NumBldgs"))],
     ["Condo number",!R?wait:g("CondoNo")?fmt(g("CondoNo")):"None"]]};
   specs.bldg={title:"Building", kv:[["Year built",P.year[i]||"—"],["Year altered",!R?wait:nonEmpty(g("YearAlter1"),g("YearAlter2"))],
-    ["Floors",!R?wait:fmt1(g("NumFloors"))],["Building frontage × depth",!R?wait:`${fmt1(g("BldgFront"))} × ${fmt1(g("BldgDepth"))} ft`],
+    ["Floors",!R?wait:fmtFl(g("NumFloors"))],["Building frontage × depth",!R?wait:`${fmt1(g("BldgFront"))} × ${fmt1(g("BldgDepth"))} ft`],
     ["Residential units",fmt(P.units[i])],["Total units",!R?wait:fmt(g("UnitsTotal"))],["Gross floor area",sqft(g("BldgArea"))],
     ["Residential floor area",sqft(g("ResArea"))],["Commercial floor area",sqft(g("ComArea"))],["Office / retail",!R?wait:`${sqft(g("OfficeArea"))} / ${sqft(g("RetailArea"))}`],
     ["Garage / storage / factory",!R?wait:`${sqft(g("GarageArea"))} / ${sqft(g("StrgeArea"))} / ${sqft(g("FactryArea"))}`]]};
@@ -842,8 +844,7 @@ function lotSpecs(i){
 
   const fkv=[["Built FAR",fmt(P.bfar[i],2)]];
   if (!F){
-    fkv.push(["Maximum FAR (base)",`— <span class="soft">${NOT_YET.toLowerCase()}</span>`],["Unused FAR","—"],["Capacity category","—"],
-      ["With qualifying / UAP housing (bonus)","—"],["With Mandatory Inclusionary Housing (bonus)","—"]); }
+    fkv.push(["Maximum FAR",`<span class="soft">${NOT_YET}</span>`]); }
   else {
     const base=F.cols.find(c=>c.kind==="base");
     fkv.push([esc(base?base.label:"Maximum FAR"),fmt(F.base,2)],["Unused FAR",fmt(fd,2)],["Capacity category",P.fc[i]<P.dict.fc.length?esc(P.dict.fc[P.fc[i]]):"—"],
@@ -860,7 +861,7 @@ function lotSpecs(i){
   const outA=polys?polys.reduce((t,poly)=>t+ringArea(poly[0])-poly.slice(1).reduce((h,r)=>h+ringArea(r),0),0)*10.7639*eLng(P.lat[i])*eLat(P.lat[i])/(KX*MLAT):null;
   if (outA) fkv.splice(1,0,["Lot outline area (measured from the map)",`${fmt(outA)} sq ft${la&&Math.abs(outA-la)/la>0.25?` <span class="soft">vs ${fmt(la)} in PLUTO</span>`:""}`]);
   { const q=dqIssues(P,i), k=P.qa?P.qa.pos[i]:-1, msg=[];
-    if (q.includes(1)) msg.push(`Built FAR (${fmt(bf,2)}) is more than 1.5 times the floor count${R?` (${fmt1(fl)})`:""}; the floor area or the floor count is likely wrong.`);
+    if (q.includes(1)) msg.push(`Built FAR (${fmt(bf,2)}) is more than 1.5 times the floor count${R?` (${fmtFl(fl)})`:""}; the floor area or the floor count is likely wrong.`);
     if (q.includes(2)) msg.push(`The unit count (${fmt(P.units[i])}) doesn't fit: ${Object.entries(DQ_FLAG_TEXT).filter(([b2])=>P.qa.flags[k]&+b2).map(([,t])=>t).join("; ")}.`);
     if (msg.length) specs.check={title:"Data check", warn:msg.join(" ")}; }
   specs.far={title:"Floor area ratio", kv:fkv, about:"far"};
@@ -999,14 +1000,14 @@ function applyClip(v){
 
 function lotRecord(i, extra){
   const P=st.P, {specs,links,R}=lotSpecs(i); st.specs=specs; st.S=null;
-  const bb=Math.round(P.bbl[i]), {block:bk,lot:lt}=bblParts(bb), zip=R&&R.ZipCode?` ${R.ZipCode}`:"";
-  return `<div class="lotids"><span>${BORO[Math.floor(bb/1e9)]||""}${zip}</span><span>Block ${bk}, lot ${lt}</span><span class="bblchip">BBL <b>${bb}</b><button data-copybbl="${bb}" title="Copy the BBL">Copy</button></span></div>
+  const bb=Math.round(P.bbl[i]), {block:bk,lot:lt}=bblParts(bb), zip=R&&R.ZipCode?` ${R.ZipCode}`:"", mx=P.mfar[i];
+  return `<div class="lotrec"><div class="lotids"><span>${BORO[Math.floor(bb/1e9)]||""}${zip}</span><span>Block ${bk}, lot ${lt}</span><span class="bblchip">BBL <b>${bb}</b><button data-copybbl="${bb}" title="Copy the BBL">Copy</button></span></div>
     <div class="tiles"><div><div class="v">${fmt(P.area[i])}</div><div class="k">Lot area, sq ft</div></div>
       <div><div class="v">${R?fmt(R.BldgArea):"…"}</div><div class="k">Floor area, sq ft</div></div>
       <div><div class="v">${fmt(P.units[i])}</div><div class="k">Housing units</div></div>
-      <div><div class="v">${fmt(P.bfar[i],2)}<span class="d eq"> of ${fmt(P.mfar[i],2)}</span></div><div class="k">Built FAR of maximum</div></div></div>
+      <div><div class="v">${fmt(P.bfar[i],2)}${Number.isNaN(mx)?"":`<span class="d eq"> of ${fmt(mx,2)}</span>`}</div><div class="k">${Number.isNaN(mx)?"Built FAR":"Built FAR of maximum"}</div></div></div>
       ${links}${Object.entries(specs).sort((a,b)=>(b[0]==="check")-(a[0]==="check")).map(([k,sp])=>sectionHTML(k,sp).replace(/<span class="grip"[^>]*>⋮⋮<\/span>/,"")).join("")}
-      <p class="note">Source: NYC DCP MapPLUTO ${P.id}.</p>`;
+      <p class="note">Source: NYC DCP MapPLUTO ${P.id}.</p></div>`;
 }
 function renderProfile(){
   const prof=$("#profile"), sel=st.sel, P=st.P; renderClipRow();
@@ -1182,7 +1183,7 @@ function styleBlocks(force){
 function renderLegend(){
   const v=st.colorBy, H=CAT_VIEWS.has(v)?st.map.hidden[v]:null, ready=farReady(v);
   const editable=["ub","yb","fc","zn","fl"].includes(v)&&ready&&st.map.fill;
-  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. Shift-click to show only this one"`:""}>${editable&&ck!=null&&code!==255?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
+  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. ${MOD}-click to show only this one"`:""}>${editable&&ck!=null&&code!==255?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
   let h="";
   if (v==="lu") h=st.P.dict.lu.map((t,i)=>sw(i,LU_COLORS[i],t)).join("");
   if (v==="ub"){ const G=ubGroups(), dflt=ubDefault();
@@ -2267,8 +2268,8 @@ function wireOptions(){
   $("#swatches").addEventListener("change",e=>{ const t=e.target;
     if (t.matches("[data-col]")){ const v=st.colorBy, i=t.dataset.col, c=t.value; setColors(C=>{ (C.custom[v]=C.custom[v]||{})[i]=c; }); }
     else if (t.id==="palSel"){ const v=st.colorBy; setColors(C=>{ C.scheme[v]=t.value; delete C.custom[v]; }); } });
-  $("#swatches").addEventListener("click",e=>{ if (e.shiftKey&&e.target.closest(".pick")) e.preventDefault(); const r=e.target.closest("[data-resetcol]"); if (r){ e.stopPropagation(); const v=r.dataset.resetcol; setColors(C=>{ delete C.custom[v]; delete C.scheme[v]; }); } },true);
-  $("#swatches").onclick=e=>{ if (e.target.closest("#palSel,.palrow,[data-resetcol]")||(!e.shiftKey&&e.target.closest(".pick"))) return;
+  $("#swatches").addEventListener("click",e=>{ if ((e.ctrlKey||e.metaKey)&&e.target.closest(".pick")) e.preventDefault(); const r=e.target.closest("[data-resetcol]"); if (r){ e.stopPropagation(); const v=r.dataset.resetcol; setColors(C=>{ delete C.custom[v]; delete C.scheme[v]; }); } },true);
+  $("#swatches").onclick=e=>{ if (e.target.closest("#palSel,.palrow,[data-resetcol]")||(!(e.ctrlKey||e.metaKey)&&e.target.closest(".pick"))) return;
     const ub=e.target.closest("[data-ubedit],[data-ubdel],[data-ubadd],[data-ubdone],[data-ubreset]");
     if (ub){ const d=ub.dataset, div=[...st.map.ubDiv], G=ubGroups();
       if ("ubedit" in d){ st.ubEdit=true; return renderLegend(); }
@@ -2278,7 +2279,7 @@ function wireOptions(){
       if ("ubdel" in d){ const k=+d.ubdel; if (G.length<2) return; const b=k?G[k][0]:G[1][0]; div[b-1]=false; return setUbDiv(div); } }
     const d=e.target.closest("[data-c]"); if(!d) return; const H=st.map.hidden[st.colorBy], c=+d.dataset.c;
     const grp=k=>st.colorBy==="ub"&&k<9?(ubGroups().find(g=>g[0]===k)||[k]):[k], cs=grp(c);
-    if (e.shiftKey){ const rest=$$("#swatches [data-c]").map(x=>+x.dataset.c).filter(k=>k!==c), solo=!H.has(c)&&rest.every(k=>H.has(k));
+    if (e.ctrlKey||e.metaKey){ const rest=$$("#swatches [data-c]").map(x=>+x.dataset.c).filter(k=>k!==c), solo=!H.has(c)&&rest.every(k=>H.has(k));
       H.clear(); if (!solo) rest.forEach(k=>grp(k).forEach(x=>H.add(x))); return restyleLots(); }
     const on=H.has(c); cs.forEach(x=>on?H.delete(x):H.add(x)); restyleLots(); };
   $("#swatches").addEventListener("change",e=>{ if (e.target.id==="ubSplit") st.ubSplit=+e.target.value; const t=e.target.closest("[data-ubfrom]"); if (!t) return;
