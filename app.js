@@ -1747,7 +1747,13 @@ function busPopup(k){ const s=st.B.stops[k], rs=s[3].map(i=>st.B.routes[i]);
   $("#maptip").hidden=true; busOpen=k;
   openPopup([s[0],s[1]],`<div class="stpop"><h3>${esc(s[2])}</h3><div class="stmeta">Bus stop · ${rs.length} route${rs.length>1?"s":""}</div>
     <div class="brts">${rs.map(r=>`<div>${busPill(r)} <span>${esc(r.name)}</span></div>`).join("")}</div>
-    ${walkBox({ent:false,fromRow:false,go:`<button class="wgo" data-wbus="${k}">Select around this stop</button>`})}</div>`); }
+    ${walkBox({ent:false,fromRow:false,go:`<button class="wgo" data-wbus="${k}">Select around this stop</button>`,bus:s[3]})}</div>`); }
+function busLineSel(ri, m){
+  const [[x0,y0],[x1,y1]]=st.P.bbox, pad=0.012, r=st.B.routes[ri], seen=new Set(), parts=[];
+  for (const s of st.B.stops){ if (!s[3].includes(ri)||!(s[0]>x0-pad&&s[0]<x1+pad&&s[1]>y0-pad&&s[1]<y1+pad)) continue;
+    const key=s[0].toFixed(4)+","+s[1].toFixed(4); if (seen.has(key)) continue; seen.add(key);
+    parts.push({type:"radius",c:[s[0],s[1]],m,label:`Within ${miles(m)} of the ${s[2]} bus stop`,clip:st.clip}); }
+  return parts.length?{type:"group",parts,name:`${miles(m)} around every ${r.n} stop (${parts.length} stops)`}:null; }
 function drawTransit(){
   const T=st.T; if (!T||!map||!map.getSource("sub-st")) return;
   map.getSource("sub-line").setData(T.lines); map.getSource("sub-plat").setData(T.platforms);
@@ -1825,7 +1831,7 @@ const WALK_PRESETS=[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]];
 function walkBox(o){
   const W=st.walk, from=o.ent?W.from:"pt", pre=WALK_PRESETS.some(([m])=>Math.abs(m-W.m)<1), seg=(k,items)=>`<div class="seg wseg" data-wset="${k}">${items}</div>`;
   const fromRow=o.fromRow===false?"":`<div class="wrow"><span class="wl">Measure from</span>${seg("from",`<button data-v="pt" class="${from==="pt"?"on":""}">Station center</button><button data-v="ent" class="${from==="ent"?"on":""}"${o.ent?"":` disabled title="No entrance data for this station"`}>Entrances</button>`)}</div>`;
-  const lines=(o.routes||[]).length?`<div class="wrow wlines"><span class="wl">Every station on</span><div class="wlb">${o.routes.map(r=>`<button class="wline" data-wline="${esc(r)}"${o.net?` data-net="${esc(o.net)}"`:""} title="Select the same distance around every station on the ${esc(r)} line" aria-label="Every station on the ${esc(r)} line">${o.net?esc(r.replace(/ Branch$/,"")):bullet(r)}</button>`).join("")}</div></div>`:"";
+  const lines=o.bus&&o.bus.length?`<div class="wrow wlines"><span class="wl">Every stop on</span><div class="wlb">${o.bus.map(i=>{ const r=st.B.routes[i]; return `<button class="wline" data-wbusline="${i}" title="Select the same distance around every stop on the ${esc(r.n)}" aria-label="Every stop on the ${esc(r.n)}">${busPill(r)}</button>`; }).join("")}</div></div>`:(o.routes||[]).length?`<div class="wrow wlines"><span class="wl">Every station on</span><div class="wlb">${o.routes.map(r=>`<button class="wline" data-wline="${esc(r)}"${o.net?` data-net="${esc(o.net)}"`:""} title="Select the same distance around every station on the ${esc(r)} line" aria-label="Every station on the ${esc(r)} line">${o.net?esc(r.replace(/ Branch$/,"")):bullet(r)}</button>`).join("")}</div></div>`:"";
   return `<div class="wbox" data-from="${from}" data-m="${W.m}">${fromRow}
     <div class="wrow"><span class="wl">Distance</span><div class="wdist">${seg("m",WALK_PRESETS.map(([m,t])=>`<button data-v="${m}" class="${pre&&Math.abs(m-W.m)<1?"on":""}">${t}</button>`).join(""))}<label class="wcust${pre?"":" on"}">or <input type="number" min="0.05" max="3" step="0.05" inputmode="decimal" value="${pre?"":+(W.m/1609.344).toFixed(2)}" placeholder="0.75" aria-label="Distance in miles"> mi</label></div></div>
     <div class="wrow wgo-row">${o.go}</div>${lines}</div>
@@ -2256,10 +2262,11 @@ function writeHash(){
   if (st.sels.length>1 && st.view!=="all") q.set("view",st.view);
   history.replaceState(null,"","#"+q.toString());
 }
+const encM=m=>String(+(+m).toFixed(1));
 function encSel(s){
   if (s.type==="group") return "g:"+s.parts.map(encSel).join("~")+(s.minus||[]).map(x=>"~-"+encSel(x)).join("")+(s.name?"~="+s.name.replace(/[~&#]/g," "):"");
   return (s.type==="area"?`a:${s.kind}:${s.code}`: s.type==="lots"?"l:"+s.bbls.join(","): s.type==="blocks"?"k:"+s.keys.join(","):
-    (s.type==="walk"?`w:${s.sid},${Math.round(s.m)}`: s.type==="radius"?`r:${s.c[0].toFixed(6)},${s.c[1].toFixed(6)},${Math.round(s.m)}`:"p:"+s.ring.slice(0,-1).map(p=>p.join(",")).join(";"))
+    (s.type==="walk"?`w:${s.sid},${encM(s.m)}`: s.type==="radius"?`r:${s.c[0].toFixed(6)},${s.c[1].toFixed(6)},${encM(s.m)}`:"p:"+s.ring.slice(0,-1).map(p=>p.join(",")).join(";"))
       +(s.clip?"!"+CLIP_CODE[s.clip]:""))+(s.excl&&s.excl.length?"^"+s.excl.join(","):"");
 }
 function parseSel(s){
@@ -2690,15 +2697,15 @@ async function boot(){
       if (ws&&!ws.disabled){ const box=ws.closest(".wbox"), k=ws.closest("[data-wset]").dataset.wset;
         ws.parentNode.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b===ws)); box.dataset[k]=ws.dataset.v; st.walk[k]=k==="m"?+ws.dataset.v:ws.dataset.v;
         if (k==="m"){ const c=box.querySelector(".wcust"); c.classList.remove("on"); c.querySelector("input").value=""; } return; }
-      const go=e.target.closest("[data-wgo],[data-went],[data-wline],[data-wbus]"); if (!go) return;
+      const go=e.target.closest("[data-wgo],[data-went],[data-wline],[data-wbus],[data-wbusline]"); if (!go) return;
       const how=clickHow(e)==="out"?null:clickHow(e), {from,m}=walkFrom(go);
       if (go.dataset.wbus!=null){ const x=st.B.stops[+go.dataset.wbus];
         return applyHow({type:"radius",c:[x[0],x[1]],m,label:`Within ${miles(m)} of the ${x[2]} bus stop`,clip:st.clip},how,true); }
       if (go.dataset.went!=null){ const x=st.T.entrances[+go.dataset.went], s=st.T.byId.get(x.sid);
         return applyHow({type:"radius",c:[x.lng,x.lat],m,label:`Within ${miles(m)} of an entrance to ${s.name}`,clip:st.clip},how,true); }
       if (go.dataset.wgo){ const sel=stationSel(go.dataset.wgo,m,go.dataset.wfrom||from); if (sel) applyHow(sel,how,true); return; }
-      const pl=go.dataset.wline[0]==="#"?+go.dataset.wline.slice(1):null;
-      const grp=pl!=null?plineSel(pl,m,go.dataset.wnew!=null):lineSel(go.dataset.wline,go.dataset.net,m,from); if (!grp) return toast(pl!=null&&!st.T?"Subway data is still loading.":"No stations on that line are near the loaded lots.");
+      const bl=go.dataset.wbusline!=null?+go.dataset.wbusline:null, pl=bl==null&&go.dataset.wline[0]==="#"?+go.dataset.wline.slice(1):null;
+      const grp=bl!=null?busLineSel(bl,m):pl!=null?plineSel(pl,m,go.dataset.wnew!=null):lineSel(go.dataset.wline,go.dataset.net,m,from); if (!grp) return toast(bl!=null?"No stops on that route are near the loaded lots.":pl!=null&&!st.T?"Subway data is still loading.":"No stations on that line are near the loaded lots.");
       if (popup) popup.remove();
       if (st.addTo!=null && st.sels[st.addTo]){ pushUndo(); const k=st.addTo, g=st.sels[k]; st.sels[k]={...g,sel:{...g.sel,parts:[...g.sel.parts,...grp.parts]}}; st.view=st.sels.length>1?k:0; drawSelection(); renderProfile(); writeHash(); return; }
       if (how==="merge"&&st.sels.length) return applyHow(grp,how,true);
