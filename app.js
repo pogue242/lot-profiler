@@ -13,6 +13,7 @@ const LOT_DEFAULT = matchMedia("(pointer:coarse)").matches||innerWidth<=820?14:1
 const UB_RAMP   = ["#DCE8F5","#B7D2EC","#8FB9E2","#639CD4","#3D7EC0","#2763A4","#174C86","#0C3765","#062647"];
 const UB_RANGE  = [[1,1],[2,2],[3,3],[4,4],[5,9],[10,19],[20,49],[50,99],[100,null]];
 const UB_STARTS = [1,2,3,4,5,10,20,50,100];
+const UB_ZERO = "#F1E9DA", UB_NONE = 254, UB_UNK = 255;
 const YB_CLASSES = [["Before 1900",0,1900,"#243A73"],["1900–1929",1900,1930,"#2F78B0"],
   ["1930–1960",1930,1961,"#4FB3BF"],["1961–1989",1961,1990,"#A6D8A8"],["1990 or later",1990,9999,"#EEDC5B"]];
 const DECADES = ["<1900","1900s","1910s","1920s","1930s","1940s","1950s","1960s","1970s","1980s","1990s","2000s","2010s","2020s"];
@@ -83,8 +84,9 @@ const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="bac
 const st = {
   releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
   walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
-  opts:{park:"whole", style:"pies", size:"s", luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
-        order:["lu","ub","fl","fc","age","zone","list"]},
+  rules:[], ruleForm:null,
+  opts:{park:"whole", style:"pies", size:"s", rules:[], ub0:false, luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
+        order:["lu","ub","fl","fc","age","zone","mix","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
        colorsOff:false, ubDiv:(()=>{ try{ const d=JSON.parse(localStorage.getItem("lp-ub-div")||"null"); if (Array.isArray(d)&&d.length===8) return d.map(Boolean); }catch(_){} return [...UB_DIV0]; })(),
@@ -281,6 +283,10 @@ async function loadFar(P){
 async function loadQA(P){
   const {H,S}=unpack(await gunzip(await fetchBytes(P.dir+P.rel.qa.file)),"LPQ2"), pos=new Int32Array(P.n).fill(-1);
   S.idx.forEach((i,k)=>pos[i]=k); P.qa={H, idx:S.idx, flags:S.flags, pos};
+}
+function needMix(P){
+  if (P.mix||P.mixReady||!P.rel||!P.rel.mix) return;
+  P.mixReady=fetchBytes(P.dir+P.rel.mix.file).then(gunzip).then(u=>{ P.mix=unpack(u,"LPM1").S.rs; if (P===st.P) renderProfile(); }).catch(err=>{ console.warn("mixed use:",err); P.mixError=true; if (P===st.P) renderProfile(); });
 }
 function dqIssues(P,i){
   const k=P.qa?P.qa.pos[i]:-1, out=[]; if (k<0) return out; const f=P.qa.flags[k];
@@ -601,7 +607,7 @@ function selTitle(P, sel, count){
   if (sel.type==="area"){ const a=P.areas[P.areaIdx.get(sel.kind+":"+sel.code)];
     return [a?a.name:sel.code,(sel.kind==="nta"?"Neighborhood tabulation area":"2020 census tract")+`, ${fmt(count)} lots`]; }
   if (sel.type==="lots"){ if (sel.bbls.length===1){ const i=P.bblIdx.get(sel.bbls[0]), p=bblParts(sel.bbls[0]);
-      return [i!=null&&addrOf(P,i)?addrOf(P,i):`BBL ${sel.bbls[0]}`, i!=null?`${P.dict.lu[P.lu[i]]}${P.dict.zone[P.zone[i]]?`  ·  ${P.dict.zone[P.zone[i]]}`:""}`:`${BORO[p.boro]}, block ${p.block}, lot ${p.lot}`]; }
+      return [i!=null&&addrOf(P,i)?addrOf(P,i):`BBL ${sel.bbls[0]}`, i!=null?`${P.dict.lu[P.lu[i]]}${P.dict.zone[P.zone[i]]?`\nZoning district ${P.dict.zone[P.zone[i]]}`:""}`:`${BORO[p.boro]}, block ${p.block}, lot ${p.lot}`]; }
     return [`${fmt(count)} selected lots`, `${MOD}-click lots to add or remove them`]; }
   if (sel.type==="blocks") return [sel.keys.length===1?blockName(sel.keys[0]):`${sel.keys.length} tax blocks`, `${fmt(count)} lots`+(sel.keys.length>1?`; ${MOD}-click blocks to add or remove`:"")];
   if (sel.type==="group") return groupTitle(P,sel,count);
@@ -623,6 +629,102 @@ function setUbDiv(div){ st.map.ubDiv=div; st.map.hidden.ub.clear();
   try{ ubDefault()?localStorage.removeItem("lp-ub-div"):localStorage.setItem("lp-ub-div",JSON.stringify(div)); }catch(_){}
   setColors(C=>{ delete C.custom.ub; }); }
 const groupColors = n => n===1?[UB_RAMP[4]]:Array.from({length:n},(_,i)=>UB_RAMP[Math.round(i*8/(n-1))]);
+const ubLabels=S=>(S.ub0?["0 units"]:[]).concat(S.groups.map(groupLabel));
+const ubColors=S=>(S.ub0?[UB_ZERO]:[]).concat(groupColors(S.groups.length));
+const MIX_CLASSES=[["Residential only","#F5D77B"],["Mixed, mostly residential","#F0A651"],["Mixed, about half and half","#DD7140"],["Mixed, mostly commercial","#BF4140"],["Commercial only","#8E2B4A"],["Neither recorded",NODATA]];
+const mixClass=r=>r===255?5:r===100?0:r===0?4:r>=75?1:r>=25?2:3;
+
+const RULE_FIELDS={
+  lu:{name:"Land use", ops:[["is","is"],["not","is not"]]},
+  ub:{name:"Housing units", ops:[["zero","are 0"],["unk","are unknown"],["lt","are fewer than"],["ge","are at least"]]},
+  yb:{name:"Year built", ops:[["unk","is unknown"],["lt","is before"],["ge","is in or after"]]},
+  fl:{name:"Floors", ops:[["unk","are unknown"],["lt","are fewer than"],["ge","are at least"]]},
+  bf:{name:"Built FAR", ops:[["unk","is unknown"],["lt","is below"],["ge","is at least"]]},
+  zn:{name:"Zoning district", ops:[["pre","starts with"],["unk","is none"]]}};
+const RULE_DEFAULT={lu:8,ub:5,yb:1900,fl:4,bf:1,zn:"PARK"};
+const RULE_FIRST={lu:"is",ub:"lt",yb:"lt",fl:"lt",bf:"lt",zn:"pre"};
+const RULE_QUICK=[["Parks and open space",{f:"lu",op:"is",v:8}],["Vacant land",{f:"lu",op:"is",v:10}],["Parking",{f:"lu",op:"is",v:9}],["0 housing units",{f:"ub",op:"zero"}]];
+const ruleNeedsV=r=>r.op!=="zero"&&r.op!=="unk";
+function ruleText(r){ const F=RULE_FIELDS[r.f], op=(F.ops.find(o=>o[0]===r.op)||F.ops[0])[1];
+  const v=!ruleNeedsV(r)?"":r.f==="lu"?st.P.dict.lu[r.v]:r.f==="zn"?String(r.v).toUpperCase():r.f==="bf"?fmt(r.v,2):String(r.v);
+  return `${F.name} ${op}${v?" "+v:""}`; }
+const zoneIdsFor=(P,r)=>{ const t=String(r.v||"").trim().toUpperCase(), out=[]; P.dict.zone.forEach((z,i)=>{ if (r.op==="unk"?!z:(t&&String(z||"").toUpperCase().startsWith(t))) out.push(i); }); return out; };
+function ruleHit(P,r){
+  const v=r.v, k=r.f==="ub"?UB_STARTS.indexOf(v):-1;
+  switch(r.f){
+    case "lu": return r.op==="not"?i=>P.lu[i]!==v:i=>P.lu[i]===v;
+    case "ub": return r.op==="zero"?i=>P.ub[i]===UB_NONE:r.op==="unk"?i=>P.ub[i]===UB_UNK:r.op==="lt"?i=>P.ub[i]===UB_NONE||P.ub[i]<k:i=>P.ub[i]>=k&&P.ub[i]<9;
+    case "yb": return r.op==="unk"?i=>!(P.year[i]>0):r.op==="lt"?i=>P.year[i]>0&&P.year[i]<v:i=>P.year[i]>0&&P.year[i]>=v;
+    case "fl": { const F=P.floors; if (!F) return r.op==="unk"?()=>true:()=>false;
+      return r.op==="unk"?i=>!(F[i]>0):r.op==="lt"?i=>F[i]>0&&F[i]<v:i=>F[i]>0&&F[i]>=v; }
+    case "bf": { const B=P.bfar, ok=i=>!Number.isNaN(B[i]); return r.op==="unk"?i=>!ok(i):r.op==="lt"?i=>ok(i)&&B[i]<v-1e-9:i=>ok(i)&&B[i]>=v-1e-9; }
+    case "zn": { const ids=new Set(zoneIdsFor(P,r)); return i=>ids.has(P.zone[i]); }
+  }
+  return ()=>false;
+}
+function ruleTest(P,rules){
+  if (!rules||!rules.length) return null;
+  const fs=rules.map(r=>ruleHit(P,r));
+  return fs.length===1?fs[0]:i=>{ for (const f of fs) if (f(i)) return true; return false; };
+}
+function ruleExpr(P,r){
+  const g=k=>["coalesce",["get",k],-1], v=r.v;
+  switch(r.f){
+    case "lu": return [r.op==="not"?"!=":"==",g("lu"),v];
+    case "ub": { const k=UB_STARTS.indexOf(v), u=g("ub");
+      return r.op==="zero"?["==",u,UB_NONE]:r.op==="unk"?["any",["==",u,UB_UNK],["<",u,0]]:r.op==="lt"?["any",["==",u,UB_NONE],["all",[">=",u,0],["<",u,k]]]:["all",[">=",u,k],["<",u,9]]; }
+    case "yb": case "fl": { const x=g(r.f); return r.op==="unk"?["<=",x,0]:["all",[">",x,0],[r.op==="lt"?"<":">=",x,v]]; }
+    case "bf": { const x=g("bf"), c=Math.round(v*100); return r.op==="unk"?["<",x,0]:["all",[">=",x,0],[r.op==="lt"?"<":">=",x,c]]; }
+    case "zn": { const ids=zoneIdsFor(P,r); return ids.length?["in",g("zn"),["literal",ids]]:false; }
+  }
+  return false;
+}
+const ruleKey=r=>JSON.stringify([r.f,r.op,ruleNeedsV(r)?r.v:null]);
+const ruleCountCache=new Map();
+function ruleCount(P,rules){ const key=P.id+"|"+rules.map(ruleKey).join(); if (ruleCountCache.has(key)) return ruleCountCache.get(key);
+  const t=ruleTest(P,rules); let n=0; if (t) for (let i=0;i<P.n;i++) if (t(i)) n++; ruleCountCache.set(key,n); return n; }
+const lowerFirst=t=>t.charAt(0).toLowerCase()+t.slice(1);
+function rulesHTML(side){
+  const map=side==="map", R=map?st.rules:st.opts.rules, f=st.ruleForm&&st.ruleForm.side===side?st.ruleForm:null;
+  const cp=map?R:[...R,...[...st.opts.luExcl].map(k=>({f:"lu",op:"is",v:k}))];
+  let h=R.length?`<div class="rchips">${R.map((r,k)=>`<span class="rchip">${esc(ruleText(r))}<button data-rdel="${k}" aria-label="Remove this rule" title="Remove this rule">×</button></span>`).join("")}</div>`:"";
+  if (R.length&&map) h+=`<div class="rnote">${fmt(ruleCount(st.P,R))} lots hidden in every map view</div>`;
+  if (f){ const F=RULE_FIELDS[f.f], need=ruleNeedsV(f);
+    const val=!need?"":f.f==="lu"?`<select data-rv aria-label="Land use">${st.P.dict.lu.map((t,i)=>`<option value="${i}"${+f.v===i?" selected":""}>${esc(t)}</option>`).join("")}</select>`
+      :f.f==="ub"?`<select data-rv aria-label="Units">${UB_STARTS.slice(1).map(s=>`<option value="${s}"${+f.v===s?" selected":""}>${s}</option>`).join("")}</select>`
+      :f.f==="zn"?`<input data-rv type="text" value="${esc(f.v)}" placeholder="e.g. PARK, R6, M1" spellcheck="false" aria-label="District code starts with">`
+      :`<input data-rv type="number" value="${esc(f.v)}" step="${f.f==="bf"?0.1:1}" min="0" aria-label="Value">`;
+    h+=`<div class="rform"><div class="rrow2"><select data-rf aria-label="Field">${Object.entries(RULE_FIELDS).map(([k,x])=>`<option value="${k}"${k===f.f?" selected":""}>${x.name}</option>`).join("")}</select>`+
+      `<select data-rop aria-label="Condition">${F.ops.map(([k,t])=>`<option value="${k}"${k===f.op?" selected":""}>${t}</option>`).join("")}</select></div>`+
+      (need?`<div class="rrow2">${val}</div>`:"")+
+      `<div class="rrow2 rbtns"><button class="mini" data-rcancel>Cancel</button><button class="mini on" data-rok>${map?"Hide":"Leave out"}</button></div>`+
+      `<div class="rquick">Common: ${RULE_QUICK.map(([t],k)=>`<button class="linkbtn" data-rq="${k}">${lowerFirst(t)}</button>`).join(", ")}</div></div>`; }
+  else h+=`<div class="ract"><button class="mini" data-radd>${R.length?"Add another rule":map?"Hide lots by a rule":"Leave out lots by a rule"}</button>${cp.length?`<button class="mini" data-rcopy title="Copy these rules to the ${map?"profile figures":"map"}. After that the two sides stay separate.">Copy to ${map?"profile":"map"}</button>`:""}</div>`;
+  return h;
+}
+function renderRules(){ const m=$("#mapRules"), p=$("#profRules"); if (m) m.innerHTML=rulesHTML("map"); if (p) p.innerHTML=rulesHTML("prof"); }
+function rulesChanged(side){ if (side==="map") restyleLots(true); else renderProfile(); renderRules(); }
+function rulesClick(e){
+  const box=e.currentTarget, side=box.id==="mapRules"?"map":"prof", R=side==="map"?st.rules:st.opts.rules, t=e.target;
+  const d=t.closest("[data-rdel]"); if (d){ R.splice(+d.dataset.rdel,1); return rulesChanged(side); }
+  if (t.closest("[data-radd]")){ st.ruleForm={side,f:"lu",op:"is",v:RULE_DEFAULT.lu}; return renderRules(); }
+  if (t.closest("[data-rcancel]")){ st.ruleForm=null; return renderRules(); }
+  const add=r=>{ if (!R.some(x=>ruleKey(x)===ruleKey(r))) R.push(r); st.ruleForm=null; rulesChanged(side); };
+  const q=t.closest("[data-rq]"); if (q) return add({...RULE_QUICK[+q.dataset.rq][1]});
+  if (t.closest("[data-rok]")){ const f=st.ruleForm; if (!f) return; const r={f:f.f,op:f.op};
+    if (ruleNeedsV(f)){ const x=f.f==="zn"?String(f.v||"").trim().toUpperCase():+f.v; if (f.f==="zn"?!x:!Number.isFinite(x)) return box.querySelector("[data-rv]").focus(); r.v=x; }
+    return add(r); }
+  if (t.closest("[data-rcopy]")){ const toMap=side==="prof", src=toMap?[...st.opts.rules,...[...st.opts.luExcl].map(k=>({f:"lu",op:"is",v:k}))]:st.rules, dst=toMap?st.rules:st.opts.rules;
+    for (const r of src) if (!dst.some(x=>ruleKey(x)===ruleKey(r))) dst.push({...r});
+    toMap?restyleLots(true):renderProfile(); renderRules();
+    const nb=box.querySelector("[data-rcopy]"); if (nb){ const was=nb.textContent; nb.textContent="Copied"; setTimeout(()=>{ if (nb.isConnected) nb.textContent=was; },1400); } }
+}
+function rulesInput(e){
+  const f=st.ruleForm, t=e.target; if (!f) return;
+  if (t.matches("[data-rf]")){ f.f=t.value; f.op=RULE_FIRST[f.f]; f.v=RULE_DEFAULT[f.f]; return renderRules(); }
+  if (t.matches("[data-rop]")){ f.op=t.value; return renderRules(); }
+  if (t.matches("[data-rv]")) f.v=t.value;
+}
 function parseGroups(text){
   const toks=text.split(/[,;|·]/).map(t=>t.trim()).filter(Boolean);
   if (!toks.length) return {err:"Type groups such as 1, 2, 3-4, 5+"};
@@ -645,16 +747,18 @@ const divText = div => groupsFrom(div).map(g=>{ const lo=UB_RANGE[g[0]][0], hi=U
 function median(arr){ if(!arr.length) return null; const a=Float64Array.from(arr).sort(), m=a.length>>1; return a.length%2?a[m]:(a[m-1]+a[m])/2; }
 
 function computeStats(P, idx, o, allLots){
-  const groups=groupsFrom(o.div), G=groups.length, b2g=new Int16Array(256).fill(-1);
-  groups.forEach((g,gi)=>g.forEach(b=>b2g[b]=gi));
-  const S={lots:0,area:0,units:0,resLots:0,groups, luL:new Float64Array(12),luA:new Float64Array(12),luU:new Float64Array(12),
-    ubL:new Float64Array(G),ubA:new Float64Array(G),ubU:new Float64Array(G), flL:new Float64Array(9),flA:new Float64Array(9),flU:new Float64Array(9), fcL:new Float64Array(8), zone:new Map(),
+  const groups=groupsFrom(o.div), z0=o.ub0?1:0, G=groups.length+z0, b2g=new Int16Array(256).fill(-1);
+  groups.forEach((g,gi)=>g.forEach(b=>b2g[b]=gi+z0)); if (z0) b2g[UB_NONE]=0;
+  const rt=ruleTest(P,o.rules||[]);
+  const S={lots:0,area:0,units:0,resLots:0,groups,ub0:!!z0,ub0n:0,ubUnk:0,ruleOut:0, luL:new Float64Array(12),luA:new Float64Array(12),luU:new Float64Array(12),
+    ubL:new Float64Array(G),ubA:new Float64Array(G),ubU:new Float64Array(G), mxL:new Float64Array(MIX_CLASSES.length),mxA:new Float64Array(MIX_CLASSES.length),mxU:new Float64Array(MIX_CLASSES.length), mixed:0, mixedUnits:0, flL:new Float64Array(9),flA:new Float64Array(9),flU:new Float64Array(9), fcL:new Float64Array(8), zone:new Map(),
     dec:new Float64Array(DECADES.length), ybc:new Float64Array(5), dictZone:P.dict.zone, filtered:0, ids:[],
     hasFar:!!P.far&&!allLots, ageLots:0, dqLots:0, dqUnits:0, parkOut:0, parkCut:0};
   const hasFar=S.hasFar;
   const areas=[],built=[],years=[]; let sm=0,sd=0,nd=0,over=0,under=0,bfa=0,mfa=0;
   for (const i of idx){
     const lu=P.lu[i]; if (o.luExcl.has(lu)||(o.boroExcl&&o.boroExcl.size&&o.boroExcl.has(Math.floor(P.bbl[i]/1e9)))) continue;
+    if (rt&&rt(i)){ S.ruleOut++; continue; }
     const dq=P.qa?dqIssues(P,i):[]; if (dq.length){ S.dqLots++; S.dqUnits+=P.units[i]; if (o.dq.mode==="exclude") continue; }
     let a=P.area[i], bfi=P.bfar[i]; const u=P.units[i];
     if (lu===PARK_LU&&o.parkF){ const f=o.parkF.get(i); if (o.park==="out"||(o.park==="edge"&&f!=null)){ S.parkOut++; continue; }
@@ -662,7 +766,9 @@ function computeStats(P, idx, o, allLots){
     S.ids.push(i);
     S.lots++; S.area+=a; S.units+=u; areas.push(a);
     S.luL[lu]++; S.luA[lu]+=a; S.luU[lu]+=u;
-    const g=b2g[P.ub[i]]; if(g>=0){ S.ubL[g]++; S.ubA[g]+=a; S.ubU[g]+=u; if(u>0) S.resLots++; }
+    const ubi=P.ub[i], g=b2g[ubi]; if(g>=0){ S.ubL[g]++; S.ubA[g]+=a; S.ubU[g]+=u; } if(u>0) S.resLots++;
+    if (ubi===UB_NONE) S.ub0n++; else if (ubi===UB_UNK) S.ubUnk++;
+    if (P.mix){ const k=mixClass(P.mix[i]); S.mxL[k]++; S.mxA[k]+=a; S.mxU[k]+=u; if (k>0&&k<4){ S.mixed++; S.mixedUnits+=u; } }
     if (P.floors){ const k=flClass(P.floors[i]); S.flL[k]++; S.flA[k]+=a; S.flU[k]+=u; }
     const z=P.zone[i]; let zr=S.zone.get(z); if(!zr) S.zone.set(z,zr=[0,0,0]); zr[0]++; zr[1]+=a; zr[2]+=u;
     if (hasFar){
@@ -722,13 +828,24 @@ function sectionSpecs(S){
     charts:[{cap:"Lots",segs:luSeg(S.luL,S.lots,"of lots",v=>fmt(v)+" lots")},{cap:"Land area",segs:luSeg(S.luA,S.area,"of land area",acres)},
             {cap:"Housing units",segs:luSeg(S.luU,S.units,"of housing units",v=>fmt(v)+" units")}],
     bar:1, headers:["Land use","% lots","% area","% units"], rows:luRows, rest:luRest};
-  const gl=S.groups.map(groupLabel), gc=groupColors(S.groups.length);
+  const gl=ubLabels(S), gc=ubColors(S);
   const tL=S.ubL.reduce((a,b)=>a+b,0),tA=S.ubA.reduce((a,b)=>a+b,0),tU=S.ubU.reduce((a,b)=>a+b,0);
   const ubSeg=(arr,tot,metric,vf)=>gl.map((k,i)=>seg(k,gc[i],arr[i],tot,metric,vf(arr[i])));
+  const lw=S.ub0?"lots":"lots with housing";
   specs.ub={title:"Housing by units per building",about:"units-per-building",barCap:"Share of housing units",
-    charts:[{cap:"Residential lots",segs:ubSeg(S.ubL,tL,"of residential lots",v=>fmt(v)+" lots")},{cap:"Land area",segs:ubSeg(S.ubA,tA,"of residential land",acres)},
+    charts:[{cap:S.ub0?"Lots":"Lots with housing",segs:ubSeg(S.ubL,tL,"of "+lw,v=>fmt(v)+" lots")},{cap:"Land area",segs:ubSeg(S.ubA,tA,"of the land of "+lw,acres)},
             {cap:"Housing units",segs:ubSeg(S.ubU,tU,"of housing units",v=>fmt(v)+" units")}],
-    bar:2, headers:["Units per building","% lots","% area","% units"], rows:gl.map((k,i)=>[gc[i],k,pct(S.ubL[i],tL),pct(S.ubA[i],tA),pct(S.ubU[i],tU)]).filter(r=>r[2]||r[4])};
+    bar:2, headers:["Units per building","% lots","% area","% units"], rows:gl.map((k,i)=>[gc[i],k,pct(S.ubL[i],tL),pct(S.ubA[i],tA),pct(S.ubU[i],tU)]).filter(r=>r[2]||r[4]),
+    html:S.ub0n||S.ub0||S.ubUnk?`<p class="hidnote">${S.ub0?`Includes ${fmt(S.ub0n)} lot${S.ub0n===1?"":"s"} with 0 units. <button class="link" data-ub0="0">Leave them out</button>`:`${fmt(S.ub0n)} lot${S.ub0n===1?"":"s"} with 0 units not shown. <button class="link" data-ub0="1">Include them</button>`}${S.ubUnk?`<br>${fmt(S.ubUnk)} lot${S.ubUnk===1?" has":"s have"} no unit count in PLUTO.`:""}</p>`:""};
+  if (P.mix){ const mn=MIX_CLASSES.map(c=>c[0]), mc=MIX_CLASSES.map(c=>c[1]);
+    const mxSeg=(arr,tot,metric,vf)=>mn.map((k,i)=>seg(k,mc[i],arr[i],tot,metric,vf(arr[i])));
+    specs.mix={title:"Mixed use",soft:`${fmt(S.mixed)} mixed-use lot${S.mixed===1?"":"s"}`,barCap:"Share of housing units",
+      charts:[{cap:"Lots",segs:mxSeg(S.mxL,S.lots,"of lots",v=>fmt(v)+" lots")},{cap:"Land area",segs:mxSeg(S.mxA,S.area,"of land area",acres)},
+              {cap:"Housing units",segs:mxSeg(S.mxU,S.units,"of housing units",v=>fmt(v)+" units")}],
+      bar:2, headers:["Floor area","% lots","% area","% units"], rows:mn.map((k,i)=>[mc[i],k,pct(S.mxL[i],S.lots),pct(S.mxA[i],S.area),pct(S.mxU[i],S.units)]).filter(r=>r[2]||r[4]),
+      kv:[["Mixed-use lots",fmt(S.mixed)],["Housing units in mixed-use buildings",fmt(S.mixedUnits)+(S.units?` (${fmt(S.mixedUnits/S.units*100,1)}%)`:"")]],
+      html:`<p class="hidnote">From each lot's residential and commercial floor area in PLUTO (ResArea and ComArea). Commercial includes office, retail and other commercial space.</p>`}; }
+  else if (P.rel&&P.rel.mix){ needMix(P); specs.mix={title:"Mixed use",placeholder:P.mixError?"Floor area by use couldn't be loaded.":"Loading floor area by use…"}; }
   if (!S.hasFar) specs.fc={title:"Zoning capacity (FAR)",soft:NOT_YET,about:"far",
     placeholder:"Maximum FAR for this release is being modeled separately and will be added later. Built FAR is from PLUTO floor area and lot area.",
     kv:[["Mean built FAR",fmt(S.meanBuilt,2)],["Median built FAR",fmt(S.medBuilt,2)],["Floor area built",fmt(S.builtFA)+" sq ft"],
@@ -889,12 +1006,8 @@ function lotSpecs(i){
       L(`https://communityprofiles.planning.nyc.gov/${(BORO[Math.floor(cdn/100)]||"").toLowerCase().replace(/ /g,"-")}/${cdn%100}`,`Community District ${cdn%100} profile`)]:[]),
       ...(cou?[L(`https://council.nyc.gov/district-${cou}/`,`Council District ${cou}`)]:[])]]].filter(([,ls])=>ls.length);
   const bblX=Math.round(P.bbl[i]), inSel=st.sels.some(e=>exclOf(e.sel).has(bblX)||selIdx0(P,e.sel).includes(i)), isX=st.sels.some(e=>exclOf(e.sel).has(bblX));
-  const links=`<div class="lotlinks">${st.peek!=null?`<button data-selpeek>Select this lot</button>`:""}${st.peek!=null&&inSel?`<button data-exlot="${bblX}">${isX?"Count in selection":"Leave out of selection"}</button>`:""}<a href="https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}" target="_blank" rel="noopener">Open in ZoLa</a>
-    <a href="https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${boro}&block=${b5}&lot=${l4}" target="_blank" rel="noopener">DOB BIS</a>
-    <a href="https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${boro}&block=${block}&lot=${lot}" target="_blank" rel="noopener">ACRIS</a>
-    <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" target="_blank" rel="noopener">Google Maps</a>
-    <a href="https://roadview.planninglabs.nyc/view/${lng}/${lat}" target="_blank" rel="noopener">Street view</a>
-    <button data-goblock="${boro*1e5+block}">Select block ${block}</button></div>`;
+  const canAdd=st.peek!=null&&st.sels.length&&!inSel, web=[[`https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}`,"ZoLa"],[`https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${boro}&block=${b5}&lot=${l4}`,"DOB BIS"],[`https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${boro}&block=${block}&lot=${lot}`,"ACRIS"],[`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,"Google Maps"],[`https://roadview.planninglabs.nyc/view/${lng}/${lat}`,"Street view"]].map(([h,t])=>`<a href="${h}" target="_blank" rel="noopener">${t}</a>`);
+  const links=`<div class="lotlinks">${canAdd?`<button data-addpeek>Add to selection</button>`:""}${st.peek!=null?`<button data-selpeek>${st.sels.length?"Select only this lot":"Select this lot"}</button>`:""}${st.peek!=null&&inSel?`<button data-exlot="${bblX}">${isX?"Count in selection":"Leave out of selection"}</button>`:""}<button data-goblock="${boro*1e5+block}">Select block ${block}</button></div><div class="lotweb"><span>Open in</span>${web.join("")}</div>`;
   specs.links={title:"Links", html:!R?`<p class="soft">${wait}</p>`:groups.map(([t,ls])=>`<div class="lgrp"><span>${t}</span><p>${ls.join("")}</p></div>`).join("")};
   return {specs, links, R};
 }
@@ -947,7 +1060,7 @@ function cmpSpecs(cols){
       .filter((r,i)=>r.hid||per.some(p=>(p.v[i]||0)>0||(p.b&&(p.b[i]||0)>0)));
     specs[key]={title,matrix:true,hide:true,metric:m,metrics,mcols,mrows,mbars:per.map(p=>p.c.D?null:names.map(([n,col],i)=>seg(n,col,p.v[i]||0,100,CMP_MNAME[m].slice(2),fmt(p.v[i]||0,1)+"%")))}; };
   const lu=S=>[...Array(12).keys()].map(k=>({name:P.dict.lu[k],color:LU_COLORS[k],v:[S.luL[k],S.luA[k],S.luU[k]]}));
-  const gl=cols[0].S.groups, gc=groupColors(gl.length), ub=S=>gl.map((g,i)=>({name:groupLabel(g),color:gc[i],v:[S.ubL[i],S.ubA[i],S.ubU[i]]}));
+  const gl=ubLabels(cols[0].S), gc=ubColors(cols[0].S), ub=S=>gl.map((g,i)=>({name:g,color:gc[i],v:[S.ubL[i],S.ubA[i],S.ubU[i]]}));
   const flc=[...FL_CLASSES.map(c=>c[0]),"Unknown"], flk=[...FL_COLORS,NODATA], fl=S=>flc.map((n,i)=>({name:n,color:flk[i],v:[S.flL[i],S.flA[i],S.flU[i]]}));
   const age=S=>YB_CLASSES.map((c,i)=>({name:c[0],color:c[3],v:[S.ybc[i],0,0]}));
   const zone=S=>{ const m=zoneRows(S), rest=[0,0,0]; m.forEach((v,n)=>{ if (!zTop.includes(n)) v.forEach((x,j)=>rest[j]+=x); });
@@ -966,7 +1079,7 @@ function matrixHTML(key,sp){
   return ms+`<div class="mt"><table><thead>${head}</thead><tbody>${bars}${body}</tbody></table></div>`;
 }
 function filterChips(){
-  const P=st.P, f=[...[...st.opts.luExcl].map(k=>[`Without ${P.dict.lu[k]}`,"lu:"+k]),...[...st.opts.boroExcl].map(b=>[`Without ${BORO[b]}`,"boro:"+b]),
+  const P=st.P, f=[...[...st.opts.luExcl].map(k=>[`Without ${P.dict.lu[k]}`,"lu:"+k]),...st.opts.rules.map((r,k)=>[`Without lots where ${lowerFirst(ruleText(r))}`,"rule:"+k]),...[...st.opts.boroExcl].map(b=>[`Without ${BORO[b]}`,"boro:"+b]),
     ...(st.opts.dq.mode!=="pluto"?[["Flagged lots left out","dq:"]]:[])], nx=new Set(st.sels.flatMap(e=>e.sel.excl||[])).size;
   if (nx) f.push([`${fmt(nx)} lot${nx>1?"s":""} left out`,"ex:"]);
   return f.length?`<p class="chips2">${f.map(([t,k])=>`<span>${esc(t)}<button data-unf="${k}" aria-label="Remove this filter">×</button></span>`).join("")}</p>`:""; }
@@ -1001,7 +1114,7 @@ function applyClip(v){
 function lotRecord(i, extra){
   const P=st.P, {specs,links,R}=lotSpecs(i); st.specs=specs; st.S=null;
   const bb=Math.round(P.bbl[i]), {block:bk,lot:lt}=bblParts(bb), zip=R&&R.ZipCode?` ${R.ZipCode}`:"", mx=P.mfar[i];
-  return `<div class="lotrec"><div class="lotids"><span>${BORO[Math.floor(bb/1e9)]||""}${zip}</span><span>Block ${bk}, lot ${lt}</span><span class="bblchip">BBL <b>${bb}</b><button data-copybbl="${bb}" title="Copy the BBL">Copy</button></span></div>
+  return `<div class="lotrec"><div class="lotids"><span>${BORO[Math.floor(bb/1e9)]||""}${zip}</span><span>Block ${bk}, lot ${lt}</span><span class="bblchip">BBL ${bb}<button data-copybbl="${bb}" title="Copy the BBL">Copy</button></span></div>
     <div class="tiles"><div><div class="v">${fmt(P.area[i])}</div><div class="k">Lot area, sq ft</div></div>
       <div><div class="v">${R?fmt(R.BldgArea):"…"}</div><div class="k">Floor area, sq ft</div></div>
       <div><div class="v">${fmt(P.units[i])}</div><div class="k">Housing units</div></div>
@@ -1045,7 +1158,7 @@ function renderProfile(){
   const shA=clippable(sel)&&clipsIn(sel).includes("touch")?shapeAcres(sel):null, over=shA&&S.acres>shA*1.2;
   const boros=[...new Set(Array.from(idx,i=>Math.floor(P.bbl[i]/1e9)))].sort();
   const boroLine=boros.length>1||st.opts.boroExcl.size?`<p class="borol">${boros.length>1?`Spans ${boros.map(b=>BORO[b]).join(", ")}. Count only: ${boros.map(b=>`<button class="link" data-onlyboro="${b}">${BORO[b]}</button>`).join(" · ")}`:""}${st.opts.boroExcl.size?` ${[...st.opts.boroExcl].map(b=>BORO[b]).join(", ")} left out. <button class="link" data-onlyboro="all">Count every borough</button>`:""}</p>`:"";
-  const dqLine=S.dqLots||st.opts.dq.mode!=="pluto"?`<p class="dqline"><b>${fmt(S.dqLots)} lot${S.dqLots===1?"":"s"}</b> here ${S.dqLots===1?"has":"have"} possible PLUTO data issues (${fmt(S.dqUnits)} units). Figures: ${[["pluto","Count them"],["exclude","Leave them out"]].map(([k,t])=>`<button class="link${st.opts.dq.mode===k?" on":""}" data-dqmode="${k}">${t}</button>`).join(" · ")}${st.colorBy!=="dq"?` · <button class="link" data-dqview>Show on map</button>`:""}</p>`:"";
+  const dqLine=S.dqLots||st.opts.dq.mode!=="pluto"?`<p class="dqline">${fmt(S.dqLots)} lot${S.dqLots===1?"":"s"} here ${S.dqLots===1?"has":"have"} possible PLUTO data issues (${fmt(S.dqUnits)} units).<span class="dqfig">Figures: ${[["pluto","Count them"],["exclude","Leave them out"]].map(([k,t])=>`<button class="link${st.opts.dq.mode===k?" on":""}" data-dqmode="${k}">${t}</button>`).join(" · ")}${st.colorBy!=="dq"?` · <button class="link" data-dqview>Show on map</button>`:""}</span></p>`:"";
   prof.innerHTML=`${filterChips()}${boroLine}${dqLine}${over?`<p class="warn spill">The lots counted cover ${fmt(S.acres,0)} acres, but the shape itself is ${fmt(shA,0)} acres: large lots (parks, rail yards, campuses) that only touch it count in full under <b>Intersecting</b>. <button class="link" data-clipto="center">Use Centroid within</button> or <button class="link" data-clipto="most">Majority within</button>${st.opts.park==="whole"?`, or count only the <button class="link" data-parkto="part">part of parks inside</button>`:""}.</p>`:""}${S.parkOut||S.parkCut?`<p class="dqline">Park rules: ${S.parkOut?`${fmt(S.parkOut)} park lot${S.parkOut===1?"":"s"} left out`:""}${S.parkOut&&S.parkCut?"; ":""}${S.parkCut?`${fmt(S.parkCut/43560,1)} acres of park outside the shape not counted`:""}. <button class="link" data-parkto="whole">Count whole parks</button></p>`:""}<div class="tiles">
       <div><div class="v">${fmt(S.lots)}</div><div class="k">Tax lots</div></div>
       <div><div class="v">${fmt(S.acres,1)}</div><div class="k">Acres of lots</div></div>
@@ -1071,7 +1184,7 @@ function colorExpr(v, get){
   if (v==="fl"){ const f=["match",flClassExpr(get(v))]; FL_COLORS.forEach((c,i)=>f.push(i,c)); f.push(NODATA); return f; }
   const m=["match",get(v)];
   if (v==="lu"){ LU_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
-  if (v==="ub"){ const k=ubIndex(); for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(NODATA); return m; }
+  if (v==="ub"){ const k=ubIndex(); for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(UB_NONE,UB_ZERO); m.push(NODATA); return m; }
   if (v==="fc"){ FC_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
   if (v==="dq"){ DQ_COLORS.forEach((c,i)=>m.push(i,c)); m.push(DQ_COLORS[0]); return m; }
   if (v==="zn"){ st.P.dict.zone.forEach((z,i)=>m.push(i,zoneColor(z))); m.push(NODATA); return m; }
@@ -1084,8 +1197,8 @@ const stateGet=v=>["coalesce",["feature-state","v"],-99999];
 
 const CLEAR="rgba(0,0,0,0)";
 function fillColor(){
-  if (st.colorBy==="dq") return dqLotExpr();
-  const v=st.colorBy, col=colorExpr(v,tileGet), hid=CAT_VIEWS.has(v)&&farReady(v)?[...st.map.hidden[v]]:[], ex=[...st.opts.luExcl], c=["case"];
+  const v=st.colorBy, dq=v==="dq", col=dq?dqLotExpr():colorExpr(v,tileGet), hid=CAT_VIEWS.has(v)&&farReady(v)&&!dq?[...st.map.hidden[v]]:[], ex=dq?[]:[...st.opts.luExcl], c=["case"];
+  const rx=st.rules.map(r=>ruleExpr(st.P,r)).filter(Boolean); if (rx.length) c.push(rx.length===1?rx[0]:["any",...rx],CLEAR);
   if (hid.length) c.push(["in",v==="fl"?flClassExpr(["coalesce",["get",v],-1]):["coalesce",["get",v],-1],["literal",hid]],CLEAR);
   if (ex.length) c.push(["in",["get","lu"],["literal",ex]],["let","c",["to-rgba",col],["rgba",["at",0,["var","c"]],["at",1,["var","c"]],["at",2,["var","c"]],0.19]]);
   return c.length===1?col:[...c,col];
@@ -1133,18 +1246,18 @@ AGG.fl=[...AGG.cat,["median","Median lot"],["max","Tallest building"]];
 AGG.dq=[["any","Any flagged lot"],...AGG.cat];
 const aggKind=v=>v==="yb"||v==="fl"||v==="dq"?v:CAT_VIEWS.has(v)?"cat":"num";
 function blockValues(P, v){
-  const B=P.blocks.length, out=new Float64Array(B).fill(NaN), ex=st.opts.luExcl;
+  const B=P.blocks.length, out=new Float64Array(B).fill(NaN), lx=st.opts.luExcl, rt=ruleTest(P,st.rules), ex={has:rt?(lu,i)=>lx.has(lu)||rt(i):lu=>lx.has(lu)};
   if (!farReady(v)) return out;
   if (v==="dq"&&st.map.blockAgg.dq==="any"){ const c=dqAll(P), cnt=new Uint32Array(3);
-    for (let j=0;j<B;j++){ cnt.fill(0); for (let t=P.blkStart[j];t<P.blkStart[j+1];t++) cnt[c[P.blkLots[t]]]++;
+    for (let j=0;j<B;j++){ cnt.fill(0); for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (rt&&rt(i)) continue; cnt[c[i]]++; }
       let best=0; for (let k=1;k<3;k++) if (cnt[k]>cnt[best]||(best===0&&cnt[k]>0)) best=k; out[j]=best; }
     return out; }
   if (v==="fl"){ const F=P.floors, ag=st.map.blockAgg.fl, LO=[...FL_CLASSES.map(c=>c[1]),0], cnt=new Float64Array(9); if (!F) return out;
     for (let j=0;j<B;j++){ const s=P.blkStart[j], e=P.blkStart[j+1];
-      if (ag==="median"||ag==="max"){ const xs=[]; for (let t=s;t<e;t++){ const i=P.blkLots[t]; if (!ex.has(P.lu[i])&&F[i]>0) xs.push(F[i]); }
+      if (ag==="median"||ag==="max"){ const xs=[]; for (let t=s;t<e;t++){ const i=P.blkLots[t]; if (!ex.has(P.lu[i],i)&&F[i]>0) xs.push(F[i]); }
         if (xs.length){ xs.sort((a,b)=>a-b); out[j]=ag==="max"?xs[xs.length-1]:xs[xs.length>>1]; } continue; }
       cnt.fill(0); let any=false;
-      for (let t=s;t<e;t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue; const wt=ag==="lots"?1:ag==="units"?P.units[i]:(P.area[i]||1); if (!(wt>0)) continue; cnt[flClass(F[i])]+=wt; any=true; }
+      for (let t=s;t<e;t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i],i)) continue; const wt=ag==="lots"?1:ag==="units"?P.units[i]:(P.area[i]||1); if (!(wt>0)) continue; cnt[flClass(F[i])]+=wt; any=true; }
       if (any){ let best=0; for (let k=1;k<9;k++) if (cnt[k]>cnt[best]) best=k; out[j]=LO[best]; } }
     return out; }
   const cat=CAT_VIEWS.has(v), arr=v==="lu"?P.lu:v==="ub"?P.ub:v==="zn"?P.zone:v==="fc"?P.fc:v==="dq"?dqAll(P):null;
@@ -1152,15 +1265,15 @@ function blockValues(P, v){
     if (!b) return null; if (v[0]==="b") return b; const g=new Float32Array(P.n); for (let i=0;i<P.n;i++) g[i]=b[i]-base[i]; return g; })():null;
   const acc=new Map(), ag=st.map.blockAgg, rm=v==="ub"?ubFirst():null;
   for (let j=0;j<B;j++){
-    if (v==="yb"){ const ys=[]; for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue; const y=P.year[i]; if (y>0) ys.push(y); }
+    if (v==="yb"){ const ys=[]; for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i],i)) continue; const y=P.year[i]; if (y>0) ys.push(y); }
       if (ys.length){ ys.sort((a,b)=>a-b); out[j]=ag.yb==="min"?ys[0]:ag.yb==="max"?ys[ys.length-1]:ys[ys.length>>1]; } continue; }
     if (cat){ acc.clear(); let best=-1, bv=0;
-      for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue;
+      for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i],i)) continue;
         const wt=ag.cat==="lots"?1:ag.cat==="units"?P.units[i]:(P.area[i]||1); if (!(wt>0)) continue;
         const k=rm&&arr[i]<9?rm[arr[i]]:arr[i], a=(acc.get(k)||0)+wt; acc.set(k,a); if (a>bv){ bv=a; best=k; } }
       if (best>=0) out[j]=best; continue; }
     if (num){ let s=0, w=0, lo=Infinity, hi=-Infinity; const xs=ag.num==="median"?[]:null;
-      for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i])) continue; const x=num[i]; if (Number.isNaN(x)) continue; const a=P.area[i]||1;
+      for (let t=P.blkStart[j];t<P.blkStart[j+1];t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i],i)) continue; const x=num[i]; if (Number.isNaN(x)) continue; const a=P.area[i]||1;
         s+=x*a; w+=a; if (x<lo) lo=x; if (x>hi) hi=x; if (xs) xs.push(x); }
       if (w) out[j]=ag.num==="max"?hi:ag.num==="min"?lo:xs?(xs.sort((a,b)=>a-b),xs[xs.length>>1]):s/w; } }
   return out;
@@ -1170,7 +1283,7 @@ let blockKey="", blockStateN=0;
 function styleBlocks(force){
   if (!map||!map.getSource("blocks")) return;
   const P=st.P, v=st.colorBy, hid=CAT_VIEWS.has(v)?st.map.hidden[v]:new Set();
-  const key=[P.id,v,[...st.opts.luExcl].join(),[...hid].join(),st.map.range[v],st.map.blockAgg[aggKind(v)],v==="dq"?JSON.stringify(st.opts.dq)+(P.qa?1:0):""].join("|");
+  const key=[P.id,v,[...st.opts.luExcl].join(),st.rules.map(ruleKey).join(),[...hid].join(),st.map.range[v],st.map.blockAgg[aggKind(v)],v==="dq"?JSON.stringify(st.opts.dq)+(P.qa?1:0):""].join("|");
   if (!force&&key===blockKey) return;
   blockKey=key; const vals=blockValues(P,v), sl={source:"blocks",sourceLayer:"blocks"};
   for (let j=0;j<vals.length;j++){ const x=vals[j]; map.setFeatureState({...sl,id:j},{v:Number.isNaN(x)?null:x,h:CAT_VIEWS.has(v)&&hid.has(v==="fl"?flClass(x):x)}); }
@@ -1183,11 +1296,11 @@ function styleBlocks(force){
 function renderLegend(){
   const v=st.colorBy, H=CAT_VIEWS.has(v)?st.map.hidden[v]:null, ready=farReady(v);
   const editable=["ub","yb","fc","zn","fl"].includes(v)&&ready&&st.map.fill;
-  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. ${MOD}-click to show only this one"`:""}>${editable&&ck!=null&&code!==255?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
+  const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. ${MOD}-click to show only this one"`:""}>${editable&&ck!=null&&code!==UB_UNK&&code!==UB_NONE?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
   let h="";
   if (v==="lu") h=st.P.dict.lu.map((t,i)=>sw(i,LU_COLORS[i],t)).join("");
   if (v==="ub"){ const G=ubGroups(), dflt=ubDefault();
-    h=st.ubEdit&&ready&&st.map.fill?ubEditor(G):`<div class="ubhead"><span>${dflt?"":`${G.length} custom buckets`}</span><button class="pen" data-ubedit title="Edit, add or delete buckets" aria-label="Edit buckets">✎</button></div>`+G.map((g,k)=>sw(g[0],UB_MAP[k],dflt?st.P.dict.ub[g[0]].replace("-","–"):groupLabel(g),k)).join("")+sw(255,NODATA,"No housing"); }
+    h=st.ubEdit&&ready&&st.map.fill?ubEditor(G):`<div class="ubhead"><span>${dflt?"":`${G.length} custom buckets`}</span><button class="pen" data-ubedit title="Edit, add or delete buckets" aria-label="Edit buckets">✎</button></div>`+G.map((g,k)=>sw(g[0],UB_MAP[k],dflt?st.P.dict.ub[g[0]].replace("-","–"):groupLabel(g),k)).join("")+sw(UB_NONE,UB_ZERO,"0 units")+sw(UB_UNK,NODATA,"Unknown"); }
   if (v==="fc") h=(ready?st.P.dict.fc:st.P.dict.fc.slice(0,7)).map((t,i)=>sw(i,FC_COLORS[i],t)).join("");
   if (v==="zn"){ const used=new Set(st.P.zone); h=st.P.dict.zone.map((z,i)=>used.has(i)?sw(i,zoneColor(z),z||"None",z||null):"").join(""); }
   if (v==="yb") h=YB_CLASSES.map((c,k)=>sw(null,c[3],c[0],k)).join("")+sw(null,NODATA,"Unknown");
@@ -1723,7 +1836,7 @@ function stationPopup(k, lngLat){
   const s=st.T.stations[k], ne=st.T.entrances.filter(e=>e.sid===s.id);
   const kinds={}; ne.forEach(e=>kinds[e.type]=(kinds[e.type]||0)+1);
   const html=`<div class="stpop"><h3>${esc(s.name)} ${s.routes.map(bullet).join("")}</h3>
-    <div class="stmeta">${esc(s.structure||"Subway")} · ${s.ada===1?"Fully accessible":s.ada===2?"Partially accessible":"Not accessible"} · ${ne.length?`${ne.length} entrance${ne.length>1?"s":""} (${Object.entries(kinds).map(([t,c])=>`${c} ${esc(t.toLowerCase())}`).join(", ")})`:"no entrance data"}</div>
+    <div class="stmeta">${esc(s.structure||"Subway")} · ${s.ada===1?"Fully accessible":s.ada===2?"Partially accessible":"Not accessible"}</div><div class="stmeta">${ne.length?`${ne.length} entrance${ne.length>1?"s":""} (${Object.entries(kinds).map(([t,c])=>`${c} ${esc(t.toLowerCase())}`).join(", ")})`:"no entrance data"}</div>
     ${walkBox({ent:ne.length>0,routes:s.routes,go:`<button class="wgo" data-wgo="${esc(s.id)}">Select around this station</button>`})}</div>`;
   openPopup(lngLat||[s.lng,s.lat], html);
 }
@@ -1821,9 +1934,16 @@ function drawFC(cursor){ const pts=cursor?[...drawPts,cursor]:drawPts, f=[];
   drawPts.forEach(p=>f.push({type:"Feature",properties:{},geometry:{type:"Point",coordinates:p}})); return {type:"FeatureCollection",features:f}; }
 const radiusFC=(c,m)=>({type:"FeatureCollection",features:[{type:"Feature",properties:{},geometry:{type:"Point",coordinates:c}},{type:"Feature",properties:{},geometry:{type:"Polygon",coordinates:[circle(c,m)]}}]});
 
+const hasIdx=(a,v)=>{ let lo=0,hi=a.length-1; while (lo<=hi){ const m=(lo+hi)>>1; if (a[m]===v) return true; if (a[m]<v) lo=m+1; else hi=m-1; } return false; };
+const markCache=new WeakMap();
+const markIdx=(P,sel)=>{ const c=markCache.get(sel); if (c&&c.P===P) return c.a; const a=selIdx0(P,sel); if (!a.provisional) markCache.set(sel,{P,a}); return a; };
+function selMark(i){ if (!st.sels.length||st.peek!=null) return ""; const P=st.P, b=Math.round(P.bbl[i]), hit=[]; let out=false;
+  for (const e of st.sels){ if (exclOf(e.sel).has(b)){ out=true; continue; } if (hasIdx(markIdx(P,e.sel),i)) hit.push(e.color); }
+  if (hit.length) return `<span class="lc-in">${hit.map(c=>`<i style="background:${c}"></i>`).join("")}${st.sels.length>1&&hit.length>1?`In ${hit.length} selections`:"In selection"}</span>`;
+  return out?`<span class="lc-in lc-out">Left out</span>`:""; }
 function lotCard(i){ const P=st.P, y=P.year[i], {boro,block,lot}=bblParts(P.bbl[i]), lu=P.lu[i], z=P.dict.zone[P.zone[i]];
   const maxTxt=P.far?fmt(P.mfar[i],2):"—";
-  return `<div class="lc"><div class="lc-h"><b>${esc(addrOf(P,i)||(P.addr?"No address":"…"))}</b><span>${BORO[boro]||""} ${block}-${lot}</span></div>
+  return `<div class="lc"><div class="lc-h"><b>${esc(addrOf(P,i)||(P.addr?"No address":"…"))}</b><span>${BORO[boro]||""} ${block}-${lot}${selMark(i)}</span></div>
     <div class="lc-t"><i style="background:${LU_COLORS[lu]}"></i>${esc(P.dict.lu[lu])}${z?`<em>${esc(z)}</em>`:""}</div>
     <dl class="lc-g"><div><dt>Lot area</dt><dd>${fmt(P.area[i])} sq ft</dd></div><div><dt>Housing units</dt><dd>${fmt(P.units[i])}</dd></div>
       <div><dt>Year built</dt><dd>${y||"—"}</dd></div><div><dt>Built / max FAR</dt><dd>${fmt(P.bfar[i],2)} <span>/ ${maxTxt}</span></dd></div></dl>
@@ -2191,8 +2311,10 @@ function wirePanel(){
       if (t==="lu"){ st.opts.luExcl.delete(+v); const x=$(`#luFilter [data-lu="${v}"]`); if (x){ x.checked=true; x.closest("label").classList.remove("off"); } restyleLots(); }
       if (t==="boro"){ st.opts.boroExcl.delete(+v); const x=$(`#boroFilter [data-boro="${v}"]`); if (x){ x.checked=true; x.closest("label").classList.remove("off"); } }
       if (t==="dq") return setDQ({mode:"pluto"});
+      if (t==="rule"){ st.opts.rules.splice(+v,1); renderRules(); }
       if (t==="ex"){ pushUndo(); st.sels=st.sels.map(e=>{ const x={...e.sel}; delete x.excl; return {...e,sel:x}; }); drawSelection(); writeHash(); }
       return renderProfile(); }
+    const u0=e.target.closest("#profile [data-ub0]"); if (u0){ st.opts.ub0=u0.dataset.ub0==="1"; return renderProfile(); }
     const dm=e.target.closest("#profile [data-dqmode]"); if (dm){ setDQ({mode:dm.dataset.dqmode}); return; }
     if (e.target.closest("#profile [data-dqview]")){ const s2=$("#colorBy"); s2.value="dq"; s2.dispatchEvent(new Event("change")); return; }
     const ob=e.target.closest("#profile [data-onlyboro]"); if (ob){ const v=ob.dataset.onlyboro; st.opts.boroExcl=new Set(v==="all"?[]:Object.keys(BORO).map(Number).filter(b=>b!==+v));
@@ -2209,6 +2331,7 @@ function wirePanel(){
     const xl=e.target.closest("[data-exlot]"); if (xl){ toggleExclude(+xl.dataset.exlot); return; }
     const zl=e.target.closest("[data-zlot]"); if (zl) return peekLot(+zl.dataset.zlot);
     const zj=e.target.closest("[data-zjump]"); if (zj){ const c=document.getElementById("zc"+zj.dataset.zjump); if (c) c.scrollIntoView({behavior:"smooth",block:"start"}); return; }
+    if (e.target.closest("[data-addpeek]")){ const bbl=st.peek; st.peek=null; setPeekState(null); setMode("lot"); return mergeInto({type:"lots",bbls:[bbl]}); }
     if (e.target.closest("[data-selpeek]")){ const bbl=st.peek; st.peek=null; setMode("lot"); return select({type:"lots",bbls:[bbl]},false); }
     const b=e.target.closest("[data-goblock]"); if (b){ const prev=snapshot(); select({type:"blocks",keys:[+b.dataset.goblock]},true,{keepPrev:true}); st.prevSel=prev; renderProfile(); }
     const pick=e.target.closest("[data-pick]"); if (pick) setView(/^\d+$/.test(pick.dataset.pick)?+pick.dataset.pick:pick.dataset.pick); });
@@ -2256,6 +2379,9 @@ function wireOptions(){
   $("#luFilter").innerHTML=st.P.dict.lu.map((t,i)=>`<label><input type="checkbox" data-lu="${i}" checked><i style="background:${LU_COLORS[i]}"></i><span>${t}</span></label>`).join("");
   $("#boroFilter").innerHTML=Object.entries(BORO).map(([b,t])=>`<label><input type="checkbox" data-boro="${b}" ${st.opts.boroExcl.has(+b)?"":"checked"}><span>${t}</span></label>`).join("");
   $("#boroFilter").onchange=e=>{ const b=+e.target.dataset.boro; e.target.checked?st.opts.boroExcl.delete(b):st.opts.boroExcl.add(b); e.target.closest("label").classList.toggle("off",!e.target.checked); renderProfile(); };
+  for (const id of ["#mapRules","#profRules"]){ const b=$(id); b.addEventListener("click",rulesClick); b.addEventListener("change",rulesInput); b.addEventListener("input",rulesInput);
+    b.addEventListener("keydown",e=>{ if (e.key==="Enter"&&e.target.matches("[data-rv]")){ e.preventDefault(); rulesInput(e); b.querySelector("[data-rok]").click(); } }); }
+  renderRules();
   $("#luFilter").onchange=e=>{ const i=+e.target.dataset.lu; e.target.checked?st.opts.luExcl.delete(i):st.opts.luExcl.add(i);
     e.target.closest("label").classList.toggle("off",!e.target.checked); restyleLots(); renderProfile(); };
   $("#btnClear").onclick=()=>{ st.addTo=null; select(null); };

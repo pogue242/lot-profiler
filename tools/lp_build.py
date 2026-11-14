@@ -22,12 +22,12 @@ def land_use_index(code):
         out[(s == f"{k:02d}") | (s == str(k))] = k - 1
     return out
 
-def unit_band(units, lu):
-    u = np.nan_to_num(np.asarray(units, np.float64), nan=0)
-    res = (lu <= 3) | (lu == 11)
+def unit_band(units):
+    u = np.asarray(units, np.float64)
     edges = np.array([1, 2, 3, 4, 5, 10, 20, 50, 100])
-    band = (np.searchsorted(edges, u, side="right") - 1).astype(np.int16)
-    band[(u <= 0) | ~res] = 255
+    band = (np.searchsorted(edges, np.nan_to_num(u, nan=0), side="right") - 1).astype(np.int16)
+    band[u <= 0] = 254
+    band[np.isnan(u)] = 255
     return band.astype(np.uint8)
 
 def whole_floors(numfloors):

@@ -93,8 +93,8 @@ def main():
     box = np.clip(np.ceil(np.maximum(box, 0) / bu), 0, 65535).astype(np.uint16)
 
     lu = L.land_use_index(df.LandUse.values)
+    ub = L.unit_band(df.UnitsRes.clip(0, 65535).to_numpy(np.float64))
     units = df.UnitsRes.fillna(0).clip(0, 65535).to_numpy(np.float64)
-    ub = L.unit_band(units, lu)
     la = df.LotArea.to_numpy(np.float64)
     bfar = np.where(la > 0, df.BldgArea.to_numpy(np.float64) / np.where(la > 0, la, 1), np.nan).astype(np.float32)
     pf = df.BuiltFAR.to_numpy(np.float64)
@@ -201,7 +201,7 @@ def main():
         "areas": areas, "nBlocks": int(len(keys)), "recFields": rec_fields,
         "files": {"tiles": "lots.pmtiles", "blockTiles": "blocks.pmtiles", "geom": "geom.bin", "rec": "rec.bin",
                   "addr": "addr.txt.gz", "areas": "areas.json.gz"},
-        "tileProps": {"i": "lot index", "lu": "land use", "ub": "building size band", "zn": "zoning index",
+        "tileProps": {"i": "lot index", "lu": "land use", "ub": "units-per-building band 0-8, 254 = 0 units, 255 = unit count blank", "zn": "zoning index",
                       "yb": "year built", "bf": "built FAR x100 (-1 = none)",
                       "fl": "whole floors, half stories counted down (0 = unknown)"},
         "far": None,

@@ -74,7 +74,7 @@ button,select,input{font:inherit;color:inherit}
 
 #head{padding:18px 18px 10px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:#fff;z-index:3}
 #areaName{font-size:21px;line-height:1.2;letter-spacing:-.01em}
-#areaSub{font-size:12.5px;color:var(--ink2);margin-top:3px}
+#areaSub{font-size:12.5px;color:var(--ink2);margin-top:3px;white-space:pre-line;line-height:1.5}
 #actions{display:flex;gap:6px;margin-top:10px}
 #actions button,.xbtn{border:1px solid var(--hair);background:#fff;border-radius:4px;padding:4px 9px;font-size:12px;cursor:pointer;color:var(--blue)}
 #actions button:hover,.xbtn:hover{border-color:var(--blue);background:var(--tint)}
@@ -460,7 +460,6 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 
 .lotids{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;font-size:12.5px;color:var(--ink2);margin:2px 0 4px}
 .bblchip{font-variant-numeric:tabular-nums}
-.bblchip b{color:var(--ink);font-weight:600}
 .bblchip button{all:unset;cursor:pointer;color:var(--blue);margin-left:6px;font-size:11.5px}
 .bblchip button:hover{text-decoration:underline}
 .lotacts{display:flex;gap:8px;margin:12px 0 2px}
@@ -508,9 +507,8 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 }
 
 .dqline{font-size:12px;color:var(--ink2);margin:8px 0 0;line-height:1.5}
-.dqline b{color:var(--ink)}
 .dqline .link{font-size:inherit}
-.dqline .link.on{font-weight:700;color:var(--ink);text-decoration:none}
+.dqline .link.on{color:var(--ink);text-decoration:none;cursor:default}
 .lc-dq{color:#9A3412}
 .lmode{display:flex;margin:2px 0 10px}
 .lmode button{flex:1;padding:5px 0;font-size:12.5px}
@@ -615,11 +613,6 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .lotrec .lotids{margin-top:4px}
 .lotrec .tiles{gap:12px 18px;margin:14px 0 4px}
 .lotrec .lotlinks{gap:6px;margin-top:14px}
-.lotrec .lotlinks a,.lotrec .lotlinks button{border:0;border-radius:14px;padding:5px 11px;background:var(--tint);color:var(--blue);font-size:12.5px}
-.lotrec .lotlinks a:first-child{background:var(--tint);color:var(--blue)}
-.lotrec .lotlinks a::after{content:"↗";font-size:10.5px;margin-left:4px;opacity:.7}
-.lotrec .lotlinks a:hover,.lotrec .lotlinks a:first-child:hover,.lotrec .lotlinks button:hover{background:var(--band)}
-.lotrec .lotlinks button{box-shadow:inset 0 0 0 1px var(--blue);background:#fff}
 .lotrec .blk{margin-top:20px}
 .lotrec .blk>h2{border-bottom:0;padding-bottom:0;margin-bottom:4px}
 .lotrec .kv{margin-top:0;row-gap:0}
@@ -628,3 +621,38 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .lotrec .kv b.nil{color:var(--ink2);font-weight:400}
 .lotrec .lgrp{border-bottom:0;padding:4px 0}
 @media (hover:hover){ .lotrec .blk>h2 .xbtn{opacity:0;transition:opacity .15s} .lotrec .blk>h2:hover .xbtn,.lotrec .blk>h2 .xbtn:focus-visible{opacity:1} }
+
+.lotrec .lotids{gap:2px 0}
+.lotrec .lotids>span+span::before{content:"·";margin:0 7px;color:var(--ink2)}
+.lotrec .lotlinks{gap:6px;margin-top:14px}
+.lotrec .lotlinks button{border:1px solid var(--hair);background:#fff;border-radius:4px;padding:4px 9px;font-size:12px;font-weight:400;color:var(--blue);box-shadow:none}
+.lotrec .lotlinks button:hover{border-color:var(--blue);background:var(--tint)}
+.lotweb{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 0;font-size:12px;color:var(--ink2)}
+.lotweb span{margin-right:2px}
+.lotweb a{border:1px solid var(--hair);background:#fff;border-radius:4px;padding:4px 9px;font-size:12px;color:var(--blue);text-decoration:none}
+.lotweb a:hover{border-color:var(--blue);background:var(--tint)}
+.lc-in{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding-left:8px;border-left:1px solid var(--hair);color:var(--ink)}
+.lc-in i{width:7px;height:7px;border-radius:50%;flex:none}
+.lc-in i:last-of-type{margin-right:2px}
+.lc-out{color:var(--ink2)}
+.dqline .dqfig{display:block;white-space:nowrap}
+.rules{margin:8px 0 2px;font-size:11.5px}
+#mapRules{margin-top:10px}
+.rules .linkbtn{all:unset;color:var(--blue);cursor:pointer}
+.rules .linkbtn:hover{text-decoration:underline}
+.rules .linkbtn:focus-visible{outline:2px solid currentColor;outline-offset:1px}
+.rules .rsep{color:var(--ink2);margin:0 6px}
+.rchips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
+.rchip{display:inline-flex;align-items:center;gap:2px;background:var(--tint);border:1px solid var(--hair);border-radius:11px;padding:1px 2px 1px 9px;font-size:11.5px;line-height:1.5}
+.rchip button{border:0;background:none;cursor:pointer;color:var(--ink2);font-size:13px;line-height:1;padding:0 5px}
+.rchip button:hover{color:#A8272B}
+.rnote{color:var(--ink2);font-size:11px;margin:-1px 0 5px}
+.rform{display:grid;gap:5px;padding:7px;border:1px solid var(--hair);border-radius:4px;background:#fff}
+.rrow2{display:flex;gap:5px;min-width:0}
+.rrow2 select,.rrow2 input{flex:1 1 0;min-width:0;font-size:12px;padding:2px 4px}
+.rbtns{justify-content:flex-end}
+.rbtns .mini{flex:none}
+.rquick{color:var(--ink2);line-height:1.5}
+.rules .ract{display:flex;flex-wrap:wrap;gap:6px}
+.rules .ract .mini{padding:3px 9px;font-size:12px}
+.rules .ract .mini:hover{border-color:var(--blue);background:var(--tint)}

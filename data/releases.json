@@ -7,8 +7,8 @@
   "dir": "25v4",
   "format": 3,
   "lots": 33535,
-  "bytes": 5931055,
-  "core": 293770,
+  "bytes": 5939128,
+  "core": 293721,
   "coverage": "Five Brooklyn NTAs",
   "source": "NYC DCP MapPLUTO 25v4, ArcGIS export for five Brooklyn NTAs (converted from the 1.5.3 pack)",
   "ntas": [
@@ -22,7 +22,11 @@
   "far": {
    "file": "far.lpk",
    "source": "Adrian's ArcGIS model for MapPLUTO 25v4 (MaxFARUse, FARDiff, FARMapCat): straight FAR from ZR 23-142 Table 1, community facility bonus and wide/narrow streets, for the five study NTAs",
-   "built": "2026-10-20"
+   "built": "2026-11-13"
+  },
+  "mix": {
+   "file": "mix.lpk",
+   "built": "2026-11-13"
   }
  },
  {
@@ -33,14 +37,18 @@
   "dir": "26v2",
   "format": 3,
   "lots": 856687,
-  "bytes": 155393642,
-  "core": 7345474,
+  "bytes": 155564891,
+  "core": 7348037,
   "coverage": "New York City",
   "source": "NYC DCP MapPLUTO 26v2 (MapPLUTO_26v2_clipped), unmodified",
   "transit": "transit_2026-10-19.json",
   "qa": {
    "file": "qa.lpk",
    "built": "2026-10-29"
+  },
+  "mix": {
+   "file": "mix.lpk",
+   "built": "2026-11-13"
   }
  }
 ]
