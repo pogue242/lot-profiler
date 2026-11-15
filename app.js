@@ -5,6 +5,7 @@ const LU_COLORS = ["#FEFFA8","#FCB842","#B16E00","#FF8341","#FC2929","#E362FB",
 const LU_NAMES = ["One & Two Family Buildings","Multi-Family Walk-Up Buildings","Multi-Family Elevator Buildings","Mixed Residential & Commercial Buildings",
   "Commercial & Office Buildings","Industrial & Manufacturing","Transportation & Utility","Public Facilities & Institutions","Open Space & Outdoor Recreation",
   "Parking Facilities","Vacant Land","Other"];
+const ZC_COLORS = ["#7FB77E","#C8423B","#7B4FA0","#2F7FC1","#D9D6CB","#C4CAD1"];
 const FC_COLORS = ["#0B5D3B","#4E9C55","#AFC97E","#E7C463","#BE3E32","#95A0AE","#D9D6CB","#C4CAD1"];
 const LOT_MINZOOM = 14;
 const LOT_ZOOMS = [14,13,12];
@@ -33,7 +34,7 @@ const UB_BASE=[...UB_RAMP], YB_BASE=YB_CLASSES.map(c=>c[3]), FC_BASE=[...FC_COLO
 const schemeDefault=v=>v==="lu"?"standard":"spectral";
 const schemeOf=v=>(st.colors.scheme[v]||schemeDefault(v));
 const hasStandard=v=>["yb","fc","zn","fd"].includes(v);
-const schemeChoices=v=>v==="lu"?[["standard","Official (ZoLa)"],["muted","Muted"]]:v==="dq"?[]:[...(hasStandard(v)?[["standard","Standard"]]:[]),
+const schemeChoices=v=>v==="lu"?[["standard","Official (ZoLa)"],["muted","Muted"]]:v==="dq"||v==="zc"?[]:[...(hasStandard(v)?[["standard","Standard"]]:[]),
   ...Object.entries(SCHEMES).filter(([k])=>v==="zn"?["distinct","spectral","viridis","ylorrd"].includes(k):(k!=="distinct"||CAT_VIEWS.has(v)||v==="yb")).map(([k,x])=>[k,x.name])];
 const sample=(c,n,cyc)=>!cyc&&c.length>=n&&n>1?Array.from({length:n},(_,i)=>c[Math.round(i*(c.length-1)/(n-1))]):Array.from({length:n},(_,i)=>c[i%c.length]);
 const FL_CLASSES=[["1 floor",1],["2 floors",2],["3 floors",3],["4–5 floors",4],["6–9 floors",6],["10–19 floors",10],["20–39 floors",20],["40 floors or more",40]];
@@ -46,13 +47,13 @@ const RAMPS = {blues:["#EEF4FA","#C3DAEE","#86B6DC","#4A8CC6","#1F5E9E","#0B3566
   viridis:["#440154","#414487","#2A788E","#22A884","#7AD151","#FDE725"],
   magma:["#FCFDBF","#FE9F6D","#DE4968","#8C2981","#3B0F70","#000004"]};
 const RANGE_DEFAULT = {bf:[0,4], mf:[0,6], fd:[-1,3]};
-const VIEW_LABEL = {fl:"Floors",dq:"PLUTO data issues",lu:"Land use",ub:"Units per building",zn:"Zoning district",fc:"FAR capacity category",
+const VIEW_LABEL = {fl:"Floors",dq:"PLUTO data issues",lu:"Land use",ub:"Units per building",zn:"Zoning district",fc:"FAR capacity category",zc:"Use and bulk vs zoning",
   bf:"Built FAR",mf:"Maximum FAR",fd:"Unused FAR (maximum minus built)",yb:"Year built"};
-const CAT_VIEWS = new Set(["lu","ub","fc","zn","dq","fl"]);
+const CAT_VIEWS = new Set(["lu","ub","fc","zn","dq","fl","zc"]);
 const DQ_NAMES=["No issue found","Built FAR above 1.5× the floor count","Unit count doesn't fit the building"];
 const DQ_COLORS=["#E6E9ED","#F08C00","#12946F"];
 const DQ_FLAG_TEXT={8:"housing units but no building floor area",16:"housing units on vacant land, parking or open space",32:"under 250 sq ft of residential floor area per unit"};
-const FAR_VIEWS = new Set(["mf","fd","fc"]);
+const FAR_VIEWS = new Set(["mf","fd","fc","zc"]);
 const isFarView = v => FAR_VIEWS.has(v) || /^[bg]_/.test(v);
 const NOT_YET = "Not yet calculated for this release";
 const NODATA = "#D5D9DD";
@@ -86,11 +87,11 @@ const st = {
   walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
   rules:[], ruleForm:null,
   opts:{park:"whole", style:"pies", size:"s", rules:[], ub0:false, luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
-        order:["lu","ub","fl","fc","age","zone","mix","list"]},
+        order:["lu","ub","fl","fc","zc","age","zone","mix","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
        colorsOff:false, ubDiv:(()=>{ try{ const d=JSON.parse(localStorage.getItem("lp-ub-div")||"null"); if (Array.isArray(d)&&d.length===8) return d.map(Boolean); }catch(_){} return [...UB_DIV0]; })(),
-       hidden:{lu:new Set(),ub:new Set(),fc:new Set(),zn:new Set(),dq:new Set(),fl:new Set()}, range:{...RANGE_DEFAULT}, ramp:"blues",
+       hidden:{lu:new Set(),ub:new Set(),fc:new Set(),zc:new Set(),zn:new Set(),dq:new Set(),fl:new Set()}, range:{...RANGE_DEFAULT}, ramp:"blues",
        ntaNames:true, sub:{lines:true, rail:true, stations:true, names:false, entrances:true, platforms:true}, bus:{stops:false, routes:false}, rings:0,
        zon:{zd:false, co:false, sp:false, ss:false, lh:false, labels:true, mih:false, ih:false, tz:false, fr:false, ed:false, ldg:false, cz:false, wap:false, uwa:false, apj:false}},
   specs:{},
@@ -157,7 +158,7 @@ function decodeCore(u, rel){
   P.blockIdx=new Map(P.blocks.map((b,j)=>[b.key,j]));
   [P.blkStart,P.blkLots]=csr(P.blk,P.blocks.length,n);
   P.blkCount=new Uint32Array(P.blocks.length); for (let j=0;j<P.blocks.length;j++) P.blkCount[j]=P.blkStart[j+1]-P.blkStart[j];
-  P.mfar=new Float32Array(n).fill(NaN); P.fdiff=new Float32Array(n).fill(NaN); P.fc=new Uint8Array(n).fill(255); P.far=null;
+  P.mfar=new Float32Array(n).fill(NaN); P.fdiff=new Float32Array(n).fill(NaN); P.fc=new Uint8Array(n).fill(255); P.zc=new Uint8Array(n).fill(255); P.far=null;
   buildGrid(P);
   return P;
 }
@@ -278,7 +279,7 @@ async function loadFar(P){
   const {H,S}=unpack(await gunzip(await fetchBytes(P.dir+P.rel.far.file)),"LPF1");
   P.far={H, cols:H.columns, base:H.base, status:S.status, rOff:S.rOff||null, rCache:new Map(), data:{}};
   for (const c of H.columns) P.far.data[c.key]=S[c.key];
-  P.mfar=S[H.base]; P.fdiff=S.fdiff; P.fc=S.fc; P.dict={...P.dict, fc:H.cats||P.dict.fc};
+  P.mfar=S[H.base]; P.fdiff=S.fdiff; P.fc=S.fc; if (S.zc) P.zc=S.zc; P.dict={...P.dict, fc:H.cats||P.dict.fc, zc:H.zcats||[]};
 }
 async function loadQA(P){
   const {H,S}=unpack(await gunzip(await fetchBytes(P.dir+P.rel.qa.file)),"LPQ2"), pos=new Int32Array(P.n).fill(-1);
@@ -753,9 +754,9 @@ function computeStats(P, idx, o, allLots){
   const S={lots:0,area:0,units:0,resLots:0,groups,ub0:!!z0,ub0n:0,ubUnk:0,ruleOut:0, luL:new Float64Array(12),luA:new Float64Array(12),luU:new Float64Array(12),
     ubL:new Float64Array(G),ubA:new Float64Array(G),ubU:new Float64Array(G), mxL:new Float64Array(MIX_CLASSES.length),mxA:new Float64Array(MIX_CLASSES.length),mxU:new Float64Array(MIX_CLASSES.length), mixed:0, mixedUnits:0, flL:new Float64Array(9),flA:new Float64Array(9),flU:new Float64Array(9), fcL:new Float64Array(8), zone:new Map(),
     dec:new Float64Array(DECADES.length), ybc:new Float64Array(5), dictZone:P.dict.zone, filtered:0, ids:[],
-    hasFar:!!P.far&&!allLots, ageLots:0, dqLots:0, dqUnits:0, parkOut:0, parkCut:0};
+    hasFar:!!P.far&&!allLots, ageLots:0, dqLots:0, dqUnits:0, parkOut:0, parkCut:0, zcL:new Float64Array(8), zcN:0};
   const hasFar=S.hasFar;
-  const areas=[],built=[],years=[]; let sm=0,sd=0,nd=0,over=0,under=0,bfa=0,mfa=0;
+  const areas=[],built=[],years=[]; let sm=0,sd=0,nd=0,over=0,under=0,bfa=0,mfa=0,low=0,room=0; const maxs=[],diffs=[];
   for (const i of idx){
     const lu=P.lu[i]; if (o.luExcl.has(lu)||(o.boroExcl&&o.boroExcl.size&&o.boroExcl.has(Math.floor(P.bbl[i]/1e9)))) continue;
     if (rt&&rt(i)){ S.ruleOut++; continue; }
@@ -772,10 +773,10 @@ function computeStats(P, idx, o, allLots){
     if (P.floors){ const k=flClass(P.floors[i]); S.flL[k]++; S.flA[k]+=a; S.flU[k]+=u; }
     const z=P.zone[i]; let zr=S.zone.get(z); if(!zr) S.zone.set(z,zr=[0,0,0]); zr[0]++; zr[1]+=a; zr[2]+=u;
     if (hasFar){
-      const fc=P.fc[i], mx=P.mfar[i];
-      if (fc<6 && mx>0){ S.filtered++; S.fcL[fc]++; sm+=mx; mfa+=mx*a;
+      const fc=P.fc[i], mx=P.mfar[i], zc=P.zc[i]; if (zc<8){ S.zcL[zc]++; S.zcN++; }
+      if (fc<6 && mx>0){ S.filtered++; S.fcL[fc]++; sm+=mx; mfa+=mx*a; maxs.push(mx);
         const b=bfi; if(!Number.isNaN(b)){ built.push(b); bfa+=b*a; }
-        const d=P.fdiff[i]; if(!Number.isNaN(d)){ sd+=d; nd++; if(d<0)over++; else if(d>0)under++; }
+        const d=P.fdiff[i]; if(!Number.isNaN(d)){ sd+=d; nd++; diffs.push(d); if(d<0)over++; else if(d>0){ under++; room+=d*a; } if(d<0.75)low++; }
         const y=P.year[i]; if(y>1800&&y<2030){ years.push(y); S.dec[y<1900?0:Math.min(13,Math.floor((y-1900)/10)+1)]++; } }
     } else {
       const b=bfi; if(!Number.isNaN(b)){ built.push(b); bfa+=b*a; }
@@ -784,7 +785,8 @@ function computeStats(P, idx, o, allLots){
   S.acres=S.area/43560; S.upa=S.acres?S.units/S.acres:null; S.medLot=median(areas);
   S.meanBuilt=built.length?built.reduce((x,y)=>x+y,0)/built.length:null; S.medBuilt=median(built);
   S.meanMax=S.filtered?sm/S.filtered:null; S.meanDiff=nd?sd/nd:null;
-  S.builtFA=bfa; S.maxFA=mfa;
+  S.builtFA=bfa; S.maxFA=mfa; S.roomFA=room; S.medMax=median(maxs); S.medDiff=median(diffs);
+  S.pctLow=nd?low/nd*100:null;
   S.pctUnder=S.filtered?under/S.filtered*100:null; S.pctOver=S.filtered?over/S.filtered*100:null;
   for (const y of years) S.ybc[y<1900?0:y<1930?1:y<1961?2:y<1990?3:4]++;
   S.years=years.length; S.medYear=median(years); S.meanYear=years.length?years.reduce((x,y)=>x+y,0)/years.length:null;
@@ -808,11 +810,11 @@ const barHTML=segs=>`<div class="core">${segs.filter(s=>s.pct>0).map(s=>`<i styl
 function pieCSS(segs){ let acc=0; const stops=[]; for (const s of segs){ if(!s.pct) continue; stops.push(`${s.c} ${(acc*3.6).toFixed(2)}deg ${((acc+s.pct)*3.6).toFixed(2)}deg`); acc+=s.pct; }
   return `conic-gradient(${stops.join(",")||"#eee 0deg 360deg"})`; }
 const piesHTML=charts=>`<div class="pies" style="--n:${charts.length}">${charts.map(ch=>`<div class="pieBox"><div class="pie" style="background:${pieCSS(ch.segs)}" data-seg="${esc(JSON.stringify(ch.segs.filter(s=>s.pct>0).map(s=>[s.k,+s.pct.toFixed(2),s.val,s.metric])))}"></div><small>${ch.cap}</small></div>`).join("")}</div>`;
-function tableHTML(headers, rows, key){
+function tableHTML(headers, rows, key, cnt){
   const cols=`grid-template-columns:11px minmax(0,1fr) repeat(${headers.length-1},58px)`, cur=key&&st.opts.sort[key]||"std";
   const hb=(h,mode,cls)=>key?`<button class="${cls} sorth${cur===mode?" on":""}" data-sort="${key}:${mode}" title="${cur===mode?"Back to the standard order":`Sort by ${h}`}">${h}${cur===mode?(mode==="az"?" ↑":" ↓"):""}</button>`:`<span class="${cls}">${h}</span>`;
-  return `<div class="rows"><div class="r hd" style="${cols}"><span></span>${hb(headers[0],"az","nm")}${headers.slice(1).map((h,k)=>hb(h,["lots","area","units"][k],"val")).join("")}</div>`+
-    rows.map(r=>`<div class="r${r.hid?" off":""}" style="${cols}"${key?` data-hidecat="${key}" data-name="${esc(r[1])}" title="${r.hid?"Click to put this back in the chart":"Click to leave this out of this chart (the rest recalculate)"}"`:""} data-k="${esc(r[1])}" data-p="${r[2]==null?"":r[2].toFixed(1)}" data-v="" data-m="${esc(headers[1]).toLowerCase().replace("%","of")}"><span class="sw" style="background:${r[0]}"></span><span class="nm">${esc(r[1])}</span>${r.slice(2).map(v=>`<span class="val">${v==null?"":fmt(v,1)+"%"}</span>`).join("")}</div>`).join("")+`</div>`;
+  return `<div class="rows"><div class="r hd" style="${cols}"><span></span>${hb(headers[0],"az","nm")}${headers.slice(1).map((h,k)=>cnt&&k===headers.length-2?`<span class="val">${h}</span>`:hb(h,["lots","area","units"][k],"val")).join("")}</div>`+
+    rows.map(r=>`<div class="r${r.hid?" off":""}" style="${cols}"${key?` data-hidecat="${key}" data-name="${esc(r[1])}" title="${r.hid?"Click to put this back in the chart":"Click to leave this out of this chart (the rest recalculate)"}"`:""} data-k="${esc(r[1])}" data-p="${r[2]==null?"":r[2].toFixed(1)}" data-v="" data-m="${esc(headers[1]).toLowerCase().replace("%","of")}"><span class="sw" style="background:${r[0]}"></span><span class="nm">${esc(r[1])}</span>${r.slice(2).map((v,j)=>`<span class="val">${v==null?"":cnt&&j===r.length-3?fmt(v):fmt(v,1)+"%"}</span>`).join("")}</div>`).join("")+`</div>`;
 }
 const NIL=/^(None|—|No|[—\s\/]+)$/;
 const kvHTML=pairs=>`<div class="kv">${pairs.map(([k,v])=>{ const n=NIL.test(String(v).trim())?" class=\"nil\"":""; return `<span${n}>${k}</span><b${n}>${v}</b>`; }).join("")}</div>`;
@@ -850,12 +852,21 @@ function sectionSpecs(S){
     placeholder:"Maximum FAR for this release is being modeled separately and will be added later. Built FAR is from PLUTO floor area and lot area.",
     kv:[["Mean built FAR",fmt(S.meanBuilt,2)],["Median built FAR",fmt(S.medBuilt,2)],["Floor area built",fmt(S.builtFA)+" sq ft"],
         ["Mean maximum FAR","—"],["Mean unused FAR","—"],["Floor area allowed","—"],["Share of allowed floor area built","—"],["Underbuilt lots","—"],["Overbuilt lots","—"]]};
-  else specs.fc={title:"Zoning capacity (FAR)",soft:`${fmt(S.filtered)} lots analyzed`,barCap:"Share of analyzed lots",about:"far",
-    charts:[{cap:"Analyzed lots",segs:P.dict.fc.map((k,i)=>seg(k,FC_COLORS[i],S.fcL[i],S.filtered,"of analyzed lots",fmt(S.fcL[i])+" lots"))}],
-    bar:0, headers:["Capacity","% lots"], rows:P.dict.fc.map((k,i)=>[FC_COLORS[i],k,pct(S.fcL[i],S.filtered)]).filter(r=>r[2]),
-    kv:[["Mean built FAR",fmt(S.meanBuilt,2)],["Median built FAR",fmt(S.medBuilt,2)],["Mean maximum usable FAR (modeled)",fmt(S.meanMax,2)],
-        ["Mean unused FAR",fmt(S.meanDiff,2)],["Floor area built",fmt(S.builtFA)+" sq ft"],["Floor area allowed (modeled)",fmt(S.maxFA)+" sq ft"],
-        ["Share of allowed floor area built",S.maxFA?fmt(S.builtFA/S.maxFA*100,1)+"%":"—"],["Underbuilt lots",pctT(S.pctUnder)],["Overbuilt lots",pctT(S.pctOver)]]};
+  else { const fcRows=P.dict.fc.map((k,i)=>[FC_COLORS[i],k,pct(S.fcL[i],S.filtered),S.fcL[i]]).filter(r=>r[3]);
+    const tile=(k,v,sub)=>`<div class="tile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, bmax=Math.max(S.builtFA,S.maxFA)||1;
+    const fbar=(k,v,c)=>`<div class="fabar"><span>${k}</span><i><em style="width:${(v/bmax*100).toFixed(2)}%;background:${c}"></em></i><b>${fmt(v/1e6,v<1e7?2:1)}M sq ft</b></div>`;
+    specs.fc={title:"Zoning capacity (FAR)",barCap:"Share of analyzed lots",cnt:true,
+      tiles:[["Built FAR",fmt(S.meanBuilt,2),`mean · median ${fmt(S.medBuilt,2)}`],["Maximum FAR",fmt(S.meanMax,2),`mean · median ${fmt(S.medMax,2)}`],["FAR left",fmt(S.meanDiff,2),`mean · median ${fmt(S.medDiff,2)}`]],
+      top:`<div class="tiles">${tile("Built FAR",fmt(S.meanBuilt,2),`mean · median ${fmt(S.medBuilt,2)}`)}${tile("Maximum FAR",fmt(S.meanMax,2),`mean · median ${fmt(S.medMax,2)}`)}${tile("FAR left",fmt(S.meanDiff,2),`mean · median ${fmt(S.medDiff,2)}`)}</div>`+
+        `<div class="fabars">${fbar("Floor area built",S.builtFA,"#5B6B7B")}${fbar("Floor area allowed",S.maxFA,"#0B5D3B")}</div>`+
+        `<p class="fanote">${S.maxFA?`Built floor area is ${fmt(S.builtFA/S.maxFA*100,1)}% of what the analyzed lots are allowed. `:""}Underbuilt lots could add ${fmt(S.roomFA/1e6,1)}M sq ft.</p>`,
+      charts:[{cap:"Analyzed lots",segs:fcRows.map(r=>seg(r[1],r[0],r[3],S.filtered,"of analyzed lots",fmt(r[3])+" lots"))}],
+      bar:0, headers:["FAR left","% lots","Lots"], rows:fcRows,
+      kv:[["Lots analyzed",fmt(S.filtered)],["Overbuilt lots",pctT(S.pctOver)],["Underbuilt lots",pctT(S.pctUnder)],["Lots with less than 0.75 FAR left",pctT(S.pctLow)]]};
+    if (S.zcN){ const zr=(P.dict.zc||[]).map((k,i)=>[ZC_COLORS[i],k,pct(S.zcL[i],S.zcN),S.zcL[i]]).filter(r=>r[3]);
+      specs.zc={title:"Use and bulk vs zoning",barCap:"Share of lots",cnt:true,
+        charts:[{cap:"Lots",segs:zr.map(r=>seg(r[1],r[0],r[3],S.zcN,"of lots",fmt(r[3])+" lots"))}],
+        bar:0, headers:["Status","% lots","Lots"], rows:zr}; } }
   if (P.floors){ const fn=[...FL_CLASSES.map(c=>c[0]),"Unknown"], fc=[...FL_COLORS,NODATA];
     const flSeg=(arr,tot,metric,vf)=>fn.map((k,i)=>seg(k,fc[i],arr[i],tot,metric,vf(arr[i])));
     specs.fl={title:"Floors",barCap:"Share of lots",
@@ -882,10 +893,10 @@ const isRestRow=r=>r[0]===NODATA&&/other/i.test(r[1]);
 function hideSpecs(specs){
   for (const [key,sp] of Object.entries(specs)){
     const H=st.opts.hideCat[key]; if (!H||!H.size||!sp.rows) continue;
-    const hid=r=>H.has(r[1]), cols=sp.headers.length-1, sums=Array(cols).fill(0), restOff=sp.rows.some(r=>isRestRow(r)&&H.has(r[1]));
+    const hid=r=>H.has(r[1]), cols=sp.headers.length-1-(sp.cnt?1:0), sums=Array(cols).fill(0), restOff=sp.rows.some(r=>isRestRow(r)&&H.has(r[1]));
     sp.rows.forEach(r=>{ if (hid(r)) for (let c=0;c<cols;c++) sums[c]+=r[c+2]||0; });
-    sp.rows=sp.rows.map(r=>{ if (hid(r)){ const x=[r[0],r[1],...Array(cols).fill(null)]; x.hid=true; return x; }
-      return [r[0],r[1],...r.slice(2).map((v,c)=>v==null||sums[c]>=99.999?v:v/(100-sums[c])*100)]; });
+    sp.rows=sp.rows.map(r=>{ if (hid(r)){ const x=[r[0],r[1],...Array(r.length-2).fill(null)]; x.hid=true; return x; }
+      return [r[0],r[1],...r.slice(2).map((v,c)=>c>=cols||v==null||sums[c]>=99.999?v:v/(100-sums[c])*100)]; });
     const segOff=g=>H.has(g.k)||(restOff&&((sp.rest||[]).includes(g.k)||(g.c===NODATA&&/other/i.test(g.k))));
     if (sp.charts) sp.charts.forEach(ch=>{ const gone=ch.segs.filter(segOff), t=gone.reduce((a,g)=>a+g.pct,0);
       ch.segs=ch.segs.filter(g=>!gone.includes(g)).map(g=>({...g,pct:t>=99.999?g.pct:g.pct/(100-t)*100})); });
@@ -905,14 +916,47 @@ function sortSpecs(specs){
     if (sp.charts) sp.charts.forEach(ch=>{ ch.segs=ch.segs.map((s,k)=>[rk(s,k),s]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]); });
   }
 }
+const ABOUT={
+  overview:"Totals for each selection side by side. Change is the newer value minus the older one.",
+  lu:"What each lot is used for, from PLUTO. Click a row to leave that use out.",
+  ub:"Lots grouped by how many homes the building has. Lots with no homes are left out unless you add them back.",
+  mix:"How much of each building is homes and how much is shops or offices, from PLUTO floor area.",
+  fc:"Built FAR is floor area divided by lot area. Maximum FAR is the most zoning allows for the lot's use. FAR left is the gap between them. Parks, special districts and public facilities are not counted.",
+  zc:"Non-conforming: zoning doesn't allow this use here. Non-complying: the use is allowed but the building is bigger than zoning now allows. Entire FAR available: the lot is empty, a parking lot or has no floor area.",
+  fl:"Lots grouped by the floor count of the tallest building.",
+  age:"When the main building went up, by decade. Most buildings before 1961 came before today's zoning.",
+  zone:"The zoning district each lot is in, largest first. Lots in two districts count under the first.",
+  list:"Every lot in the selection. Click one to open its record.",
+  lotinfo:"Owner, lot size and frontage, from PLUTO.",
+  bldg:"The building on the lot: age, floors, homes and floor area.",
+  zoning:"The zoning districts, overlays and special districts PLUTO lists for this lot.",
+  check:"PLUTO numbers that don't add up. We show them as PLUTO has them.",
+  far:"How much floor area is built compared with the most zoning allows for this use.",
+  trace:"How the maximum was worked out: which districts the lot is in, which rules apply and the final number.",
+  districts:"The community district and council district the lot is in.",
+  misc:"Landmark status, flood zone and assessed value.",
+  links:"Other city maps and records for this lot."};
+function aboutOff(){ const d=$("#aboutPop"); if (d) d.hidden=true; $$(".ibtn.on").forEach(b=>b.classList.remove("on")); }
+function aboutPop(btn){
+  let d=$("#aboutPop"); const was=d&&!d.hidden&&d.dataset.k===btn.dataset.about;
+  if (!d){ d=document.createElement("div"); d.id="aboutPop"; d.setAttribute("role","tooltip"); d.hidden=true; document.body.appendChild(d);
+    document.addEventListener("click",e=>{ if (!e.target.closest("#aboutPop,[data-about]")) aboutOff(); });
+    addEventListener("keydown",e=>{ if (e.key==="Escape") aboutOff(); });
+    addEventListener("scroll",aboutOff,true); addEventListener("resize",aboutOff); }
+  aboutOff(); if (was) return;
+  d.textContent=ABOUT[btn.dataset.about]; d.dataset.k=btn.dataset.about; d.hidden=false; btn.classList.add("on");
+  const r=btn.getBoundingClientRect(), w=Math.min(280,innerWidth-24); d.style.width=w+"px";
+  const x=Math.max(12,Math.min(innerWidth-w-12,r.left+r.width/2-w/2)), h=d.offsetHeight, below=r.bottom+8+h<innerHeight;
+  d.style.left=x+"px"; d.style.top=(below?r.bottom+8:r.top-8-h)+"px"; }
 function sectionHTML(key, sp){
   const pies=st.opts.style==="pies";
   const shut=st.opts.shut.has(key);
-  let h=`<section class="blk${shut?" shut":""}" data-key="${key}"><h2><span class="grip" title="Drag to reorder">⋮⋮</span><button class="fold" data-fold="${key}" aria-expanded="${!shut}" title="${shut?"Show":"Hide"} this section"><span class="chev" aria-hidden="true">▾</span>${sp.title}</button>${sp.lots||sp.html||sp.warn?"":`<button class="xbtn" data-export="${key}" title="Download this section as an image">PNG</button>`}</h2>`;
+  let h=`<section class="blk${shut?" shut":""}" data-key="${key}"><h2><span class="grip" title="Drag to reorder">⋮⋮</span><button class="fold" data-fold="${key}" aria-expanded="${!shut}" title="${shut?"Show":"Hide"} this section"><span class="chev" aria-hidden="true">▾</span>${sp.title}</button>${ABOUT[key]?`<button class="ibtn" data-about="${key}" aria-label="What this section shows" title="What this section shows">i</button>`:""}${sp.lots||sp.html||sp.warn?"":`<button class="xbtn" data-export="${key}" title="Download this section as an image">PNG</button>`}</h2>`;
+  if (sp.top) h+=sp.top;
   if (sp.charts) h+=pies?piesHTML(sp.charts):barHTML(sp.charts[sp.bar].segs);
   if (sp.hist){ const mx=Math.max(1,...sp.hist.map(b=>b[1]));
     h+=`<div class="hist">${sp.hist.map(([d,p,c])=>`<i style="height:${(p/mx*100).toFixed(1)}%" data-k="Built ${d}" data-p="${p.toFixed(1)}" data-v="${fmt(c)} lots" data-m="of lots with a year"></i>`).join("")}</div><div class="histx">${DECADES.map((d,k)=>`<span>${k%3===0?esc(d):""}</span>`).join("")}</div>`; }
-  if (sp.rows) h+=tableHTML(sp.headers,sp.rows,key)+(sp.hiddenNote?`<p class="hidnote">Left out of this chart: ${sp.hiddenNote.map(esc).join(", ")}. Percentages are of the rest. <button class="link" data-showall="${key}">Show all</button></p>`:"")+(st.opts.sort[key]&&st.opts.sort[key]!=="std"?`<button class="link sortreset" data-sort="${key}:std">Back to the standard order</button>`:"");
+  if (sp.rows) h+=tableHTML(sp.headers,sp.rows,key,sp.cnt)+(sp.hiddenNote?`<p class="hidnote">Left out of this chart: ${sp.hiddenNote.map(esc).join(", ")}. Percentages are of the rest. <button class="link" data-showall="${key}">Show all</button></p>`:"")+(st.opts.sort[key]&&st.opts.sort[key]!=="std"?`<button class="link sortreset" data-sort="${key}:std">Back to the standard order</button>`:"");
   if (sp.lots){ const P=st.P, cols="grid-template-columns:minmax(0,1fr) 44px 92px";
     h+=`<div class="rows lotlist"><div class="r hd" style="${cols}"><span class="nm">Address</span><span class="val">Units</span><span class="val">FAR built/max</span></div>${sp.lots.map(i=>`<div class="r" style="${cols}" data-lot="${Math.round(P.bbl[i])}"><span class="nm">${esc(addrOf(P,i)||"BBL "+Math.round(P.bbl[i]))}</span><span class="val">${fmt(P.units[i])}</span><span class="val">${fmt(P.bfar[i],2)} / ${fmt(P.mfar[i],2)}</span></div>`).join("")}</div>`; }
   if (sp.matrix) h+=matrixHTML(key,sp);
@@ -925,7 +969,7 @@ function sectionHTML(key, sp){
 
 const OWNER_TYPE={C:"City",M:"Mixed city and private",O:"Other public (state or federal)",P:"Private",X:"Tax-exempt"};
 const nonEmpty=(...v)=>v.filter(x=>x!=null&&x!==""&&x!==0&&x!=="0").join(", ")||"None";
-const FAR_STATUS={modeled:"Modeled",provisional:"Provisional (rules still under review)",not_modeled:"Not modeled (rules not encoded yet)"};
+const FAR_STATUS={modeled:"Modeled",provisional:"Provisional (rules still under review)",not_modeled:"Not modeled (rules not encoded yet)",not_rated:"Not rated for this use"};
 
 function farOf(P, i){
   if (!P.far) return null; const F=P.far, v=F.data[F.base][i];
@@ -973,16 +1017,16 @@ function lotSpecs(i){
     [has("AffResFAR")?"PLUTO affordable residential FAR":"PLUTO adjusted residential FAR",!R?wait:fmt(g("AffResFAR","AdjResFar"),2)],
     ["PLUTO commercial / community facility FAR",!R?wait:`${fmt(g("CommFAR"),2)} / ${fmt(g("FacilFAR"),2)}`],
     ...(has("ManuFAR")?[["PLUTO manufacturing FAR",!R?wait:fmt(g("ManuFAR"),2)]]:[]));
-  const fl=+g("NumFloors")||0, bf=P.bfar[i], polys=lotRingsM(P,i);
-  if (!polys) needLots(P,[i]).then(again).catch(()=>{});
-  const outA=polys?polys.reduce((t,poly)=>t+ringArea(poly[0])-poly.slice(1).reduce((h,r)=>h+ringArea(r),0),0)*10.7639*eLng(P.lat[i])*eLat(P.lat[i])/(KX*MLAT):null;
-  if (outA) fkv.splice(1,0,["Lot outline area (measured from the map)",`${fmt(outA)} sq ft${la&&Math.abs(outA-la)/la>0.25?` <span class="soft">vs ${fmt(la)} in PLUTO</span>`:""}`]);
+  const fl=+g("NumFloors")||0, bf=P.bfar[i];
   { const q=dqIssues(P,i), k=P.qa?P.qa.pos[i]:-1, msg=[];
     if (q.includes(1)) msg.push(`Built FAR (${fmt(bf,2)}) is more than 1.5 times the floor count${R?` (${fmtFl(fl)})`:""}; the floor area or the floor count is likely wrong.`);
     if (q.includes(2)) msg.push(`The unit count (${fmt(P.units[i])}) doesn't fit: ${Object.entries(DQ_FLAG_TEXT).filter(([b2])=>P.qa.flags[k]&+b2).map(([,t])=>t).join("; ")}.`);
     if (msg.length) specs.check={title:"Data check", warn:msg.join(" ")}; }
   specs.far={title:"Floor area ratio", kv:fkv, about:"far"};
-  if (F && R && (R.far_trace||R.split_shares)) specs.trace={title:"How this FAR was calculated", kv:[
+  if (F && R && (R.far_trace||R.split_shares||R.far_use)) specs.trace={title:"How this FAR was calculated", kv:[
+    ...(R.far_use?[["Use the maximum is for",esc(R.far_use)]]:[]),
+    ...(P.zc[i]<(P.dict.zc||[]).length?[["Use and bulk vs zoning",esc(P.dict.zc[P.zc[i]])]]:[]),
+    ...(R.far_note?[["Note",esc(R.far_note)]]:[]),
     ...(R.split_shares?[["Share in each zoning district",esc(R.split_shares)]]:[]),...(R.far_trace?[["Portions and rules applied",`<code>${esc(R.far_trace)}</code>`]]:[])]};
   specs.districts={title:"Districts", kv:[["Community district",!R?wait:cd?(isJIA(cd)?`Joint interest area ${cd%100} (${BORO[Math.floor(cd/100)]||""}, PLUTO code ${cd})`:`${BORO[Math.floor(cd/100)]||""} CD ${cd%100}`):"—"],["City Council district",!R?wait:fmt(g("Council"))],
     ["School district",!R?wait:fmt(g("SchoolDist"))],["Police precinct",!R?wait:fmt(g("PolicePrct"))],["Fire company",txt(g("FireComp"))],["ZIP code",!R?wait:g("ZipCode")||"—"],
@@ -1186,6 +1230,7 @@ function colorExpr(v, get){
   if (v==="lu"){ LU_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
   if (v==="ub"){ const k=ubIndex(); for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(UB_NONE,UB_ZERO); m.push(NODATA); return m; }
   if (v==="fc"){ FC_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
+  if (v==="zc"){ ZC_COLORS.forEach((c,i)=>m.push(i,c)); m.push(NODATA); return m; }
   if (v==="dq"){ DQ_COLORS.forEach((c,i)=>m.push(i,c)); m.push(DQ_COLORS[0]); return m; }
   if (v==="zn"){ st.P.dict.zone.forEach((z,i)=>m.push(i,zoneColor(z))); m.push(NODATA); return m; }
   if (v==="yb") return ["case",["<=",get("yb"),0],NODATA,["step",get("yb"),YB_CLASSES[0][3],1900,YB_CLASSES[1][3],1930,YB_CLASSES[2][3],1961,YB_CLASSES[3][3],1990,YB_CLASSES[4][3]]];
@@ -1260,7 +1305,7 @@ function blockValues(P, v){
       for (let t=s;t<e;t++){ const i=P.blkLots[t]; if (ex.has(P.lu[i],i)) continue; const wt=ag==="lots"?1:ag==="units"?P.units[i]:(P.area[i]||1); if (!(wt>0)) continue; cnt[flClass(F[i])]+=wt; any=true; }
       if (any){ let best=0; for (let k=1;k<9;k++) if (cnt[k]>cnt[best]) best=k; out[j]=LO[best]; } }
     return out; }
-  const cat=CAT_VIEWS.has(v), arr=v==="lu"?P.lu:v==="ub"?P.ub:v==="zn"?P.zone:v==="fc"?P.fc:v==="dq"?dqAll(P):null;
+  const cat=CAT_VIEWS.has(v), arr=v==="lu"?P.lu:v==="ub"?P.ub:v==="zn"?P.zone:v==="fc"?P.fc:v==="zc"?P.zc:v==="dq"?dqAll(P):null;
   const num=v==="bf"?P.bfar:v==="mf"?P.mfar:v==="fd"?P.fdiff:/^[bg]_/.test(v)&&P.far?(()=>{ const k="far_"+v.slice(2), b=P.far.data[k], base=P.mfar;
     if (!b) return null; if (v[0]==="b") return b; const g=new Float32Array(P.n); for (let i=0;i<P.n;i++) g[i]=b[i]-base[i]; return g; })():null;
   const acc=new Map(), ag=st.map.blockAgg, rm=v==="ub"?ubFirst():null;
@@ -1302,6 +1347,8 @@ function renderLegend(){
   if (v==="ub"){ const G=ubGroups(), dflt=ubDefault();
     h=st.ubEdit&&ready&&st.map.fill?ubEditor(G):`<div class="ubhead"><span>${dflt?"":`${G.length} custom buckets`}</span><button class="pen" data-ubedit title="Edit, add or delete buckets" aria-label="Edit buckets">✎</button></div>`+G.map((g,k)=>sw(g[0],UB_MAP[k],dflt?st.P.dict.ub[g[0]].replace("-","–"):groupLabel(g),k)).join("")+sw(UB_NONE,UB_ZERO,"0 units")+sw(UB_UNK,NODATA,"Unknown"); }
   if (v==="fc") h=(ready?st.P.dict.fc:st.P.dict.fc.slice(0,7)).map((t,i)=>sw(i,FC_COLORS[i],t)).join("");
+  if (v==="zc"){ const c=new Uint32Array(8); if (ready) for (const x of st.P.zc) if (x<8) c[x]++;
+    h=(st.P.dict.zc||[]).map((t,i)=>sw(i,ZC_COLORS[i],`${t} (${fmt(c[i])})`)).join("")||`<div class="shint">${NOT_YET}</div>`; }
   if (v==="zn"){ const used=new Set(st.P.zone); h=st.P.dict.zone.map((z,i)=>used.has(i)?sw(i,zoneColor(z),z||"None",z||null):"").join(""); }
   if (v==="yb") h=YB_CLASSES.map((c,k)=>sw(null,c[3],c[0],k)).join("")+sw(null,NODATA,"Unknown");
   if (v==="fl") h=FL_CLASSES.map((c,k)=>sw(k,FL_COLORS[k],c[0])).join("")+sw(8,NODATA,"Unknown",null)+(st.P.floors?"":`<div class="shint">This release has no floor counts.</div>`);
@@ -1400,7 +1447,7 @@ const EMPTY={type:"FeatureCollection",features:[]};
 function buildColorBy(){
   const P=st.P, F=P.far, sel=$("#colorBy"), cur=st.colorBy, nt=F?"":" (not yet calculated)";
   const opts=[["lu","Land use"],["ub","Units per building"],["yb","Year built"],["fl","Floors"],["bf","Built FAR"],
-    ["mf","Maximum FAR"+nt],["fd","Unused FAR"+nt],["fc","FAR capacity category"+nt],["dq","PLUTO data issues"]];
+    ["mf","Maximum FAR"+nt],["fd","Unused FAR"+nt],["fc","FAR capacity category"+nt],["zc","Use and bulk vs zoning"+nt],["dq","PLUTO data issues"]];
   if (F) for (const c of F.cols.filter(c=>c.kind==="bonus")){ const k=c.key.slice(4), sh=c.short||k.toUpperCase();
     opts.push(["b_"+k,`Maximum FAR with ${sh}`],["g_"+k,`${sh} gain (FAR added)`]); VIEW_LABEL["b_"+k]=`Maximum FAR with ${sh}`; VIEW_LABEL["g_"+k]=`${sh} gain`; }
   sel.innerHTML=opts.map(([v,t])=>`<option value="${v}">${esc(t)}</option>`).join("");
@@ -2329,6 +2376,7 @@ function wirePanel(){
     const ct=e.target.closest("#profile [data-clipto]"); if (ct) return applyClip(ct.dataset.clipto);
     const pt=e.target.closest("#profile [data-parkto]"); if (pt) return setPark(pt.dataset.parkto);
     const so=e.target.closest("#profile [data-sort]"); if (so){ const [k,m]=so.dataset.sort.split(":"); st.opts.sort[k]=st.opts.sort[k]===m?"std":m; return renderProfile(); }
+    const ab=e.target.closest("#profile [data-about]"); if (ab){ e.stopPropagation(); return aboutPop(ab); }
     const fo=e.target.closest("#profile [data-fold]"); if (fo){ const k=fo.dataset.fold, sec=fo.closest(".blk"), shut=!st.opts.shut.has(k);
       shut?st.opts.shut.add(k):st.opts.shut.delete(k); sec.classList.toggle("shut",shut); fo.setAttribute("aria-expanded",String(!shut)); fo.title=(shut?"Show":"Hide")+" this section"; return; }
     const rm=e.target.closest("#profile [data-x]"); if (rm){ e.stopPropagation(); return removeSel(+rm.dataset.x); }
@@ -2481,7 +2529,7 @@ function composeMap(shot,k){
   g.textAlign=two?"left":"right"; g.fillText(WM,two?20:W-20,two?fy+14:fy); g.textAlign="left";
   return cv; }
 function composeSection(key,k){
-  const sp=st.specs[key], pies=st.opts.style==="pies"&&sp.charts, rows=(sp.rows||[]).filter(r=>!r.hid), kv=sp.kv||[], mr=(sp.mrows||[]).filter(r=>!r.hid), mc=sp.mcols||[];
+  const sp=st.specs[key], pies=st.opts.style==="pies"&&sp.charts, rows=(sp.rows||[]).filter(r=>!r.hid), kv=[...(sp.tiles||[]).map(t=>[t[0]+" ("+t[2]+")",t[1]]),...(sp.kv||[])], mr=(sp.mrows||[]).filter(r=>!r.hid), mc=sp.mcols||[];
   const W=Math.max(680,mr.length?250+mc.length*112:0), chartH=sp.charts?(pies?176:sp.charts.length*30+10):sp.hist?132:0;
   const top=exp.sub?0:-16, H=74+top+chartH+(rows.length?(rows.length+1)*24+14:0)+(mr.length?(mr.length+1)*26+14:0)+kv.length*24+40;
   const cv=document.createElement("canvas"); cv.width=Math.round(W*k); cv.height=Math.round(H*k); const g=cv.getContext("2d"); g.scale(k,k);
@@ -2503,7 +2551,7 @@ function composeSection(key,k){
   if (rows.length){ const cw=Math.min(96,(W-300)/Math.max(1,sp.headers.length-1)); g.font=XF(600,11.5); g.fillStyle=XC.ink3; g.fillText(sp.headers[0].toUpperCase(),24,y+8);
     sp.headers.slice(1).forEach((h,j)=>{ g.textAlign="right"; g.fillText(h.toUpperCase(),W-24-(sp.headers.length-2-j)*cw,y+8); g.textAlign="left"; }); y+=14; rule(y);
     rows.forEach(r=>{ y+=24; g.fillStyle=r[0]; g.fillRect(24,y-11,11,11); g.fillStyle=XC.ink; g.font=XF(400,13); g.fillText(r[1],44,y);
-      r.slice(2).forEach((v,j)=>{ g.textAlign="right"; g.fillText(v==null?"":fmt(v,1)+"%",W-24-(r.length-3-j)*cw,y); g.textAlign="left"; }); rule(y+7); }); y+=14; }
+      r.slice(2).forEach((v,j)=>{ g.textAlign="right"; g.fillText(v==null?"":sp.cnt&&j===r.length-3?fmt(v):fmt(v,1)+"%",W-24-(r.length-3-j)*cw,y); g.textAlign="left"; }); rule(y+7); }); y+=14; }
   if (mr.length){ const cw=(W-274)/mc.length; g.font=XF(600,11.5);
     mc.forEach((c,ci)=>{ const x=274+cw*(ci+1)-4; g.textAlign="right"; g.fillStyle=c.color||XC.ink2; g.fillText((c.name.length>16?c.name.slice(0,15)+"…":c.name),x,y+8); }); g.textAlign="left"; y+=14; rule(y);
     mr.forEach(r=>{ y+=26; if (r.color){ g.fillStyle=r.color; g.fillRect(24,y-11,11,11); } g.fillStyle=XC.ink; g.font=XF(400,13); g.fillText(plain(r[0]),r.color?44:24,y);

@@ -1,0 +1,25 @@
+{
+ "source": "Lot Profiler FAR engine 1.9.2 (ZR text read November 15, 2026; MapPLUTO 26v2; DCM 2025-10-31; zoning 2026-08)",
+ "columns": {
+  "far_std": {
+   "label": "Maximum FAR for the lot's use",
+   "kind": "base"
+  },
+  "far_res": {
+   "label": "Residential FAR",
+   "kind": "other"
+  },
+  "far_comm": {
+   "label": "Commercial / manufacturing FAR",
+   "kind": "other"
+  },
+  "far_cf": {
+   "label": "Community facility FAR",
+   "kind": "other"
+  },
+  "wide_share": {
+   "label": "Share within 100 ft of a wide street",
+   "kind": "other"
+  }
+ }
+}
