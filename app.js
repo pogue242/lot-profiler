@@ -1377,6 +1377,7 @@ function styleBlocks(force){
   map.setPaintProperty("blocks-top","fill-color",["case",["boolean",["feature-state","h"],false],CLEAR,col]);
 }
 function renderLegend(){
+  if (st.bldg&&st.bldg.on&&(st.bldg.color==="ub"||st.bldg.color==="lu")) applyBldg();
   const v=st.colorBy, H=CAT_VIEWS.has(v)?st.map.hidden[v]:null, ready=farReady(v);
   const editable=["ub","yb","fc","zn","fl"].includes(v)&&ready&&st.map.fill;
   const sw=(code,c,t,ck=code)=>`<div${code!=null&&ready?` data-c="${code}" class="${H&&H.has(code)?"hid":""}" title="Click to hide or show. ${MOD}-click to show only this one"`:""}>${editable&&ck!=null&&code!==UB_UNK&&code!==UB_NONE?`<label class="pick" style="background:${c}" title="Change this color"><input type="color" data-col="${esc(String(ck))}" value="${c.toLowerCase()}" aria-label="Color for ${esc(t)}"></label>`:`<i style="background:${c}"></i>`}${esc(t)}</div>`;
@@ -1465,10 +1466,13 @@ const BLDG_FILE="data/buildings_2026-10-30.pmtiles", BLDG_Z=15;
 const BH_STOPS=[0,20,40,75,150,300,600], BH_COLORS=["#FFF3D1","#FDD49A","#F7A35F","#E26A3B","#BD3B2B","#85192D","#470C2E"];
 const BY_STOPS=[0,1900,1930,1960,1990,2010], BY_COLORS=["#3B2D6E","#3E5C9A","#3A8A9E","#4CB38A","#9BD15B","#F2E64B"];
 const OVER_COLOR="#D6006E", MAX_H=2000, HGT=["case",[">",["get","h"],MAX_H],0,["get","h"]], B_NONE="#D9DDE1";
+const bGet=v=>["coalesce",["get",v],-1];
 const bSteps=(get,S,C)=>["step",get,C[0],...S.slice(1).flatMap((s,k)=>[s,C[k+1]])];
 function bColorExpr(){ const c=st.bldg.color;
   if (c==="gray") return "#C9CDD2";
   if (c==="y") return ["case",["<=",["get","y"],0],B_NONE,bSteps(["get","y"],BY_STOPS,BY_COLORS)];
+  if (c==="lu"){ const m=["match",bGet("lu")]; LU_COLORS.forEach((x,i)=>m.push(i,x)); m.push(B_NONE); return m; }
+  if (c==="ub"){ const k=ubIndex(), m=["match",bGet("ub")]; for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(UB_NONE,UB_ZERO); m.push(B_NONE); return m; }
   return ["case",[">",["get","h"],MAX_H],B_NONE,bSteps(["get","h"],BH_STOPS,BH_COLORS)]; }
 let navRot=null;
 function addBldgLayers(){
@@ -1488,7 +1492,7 @@ function applyBldg(){
   vis("bldg-fill",b.on&&!b.d3); vis("bldg-line",b.on&&!b.d3); vis("bldg-3d",b.on&&b.d3); vis("bldg-over",b.on&&over&&!b.d3); vis("bldg-hl",b.on);
   map.setPaintProperty("bldg-fill","fill-color",col); map.setPaintProperty("bldg-3d","fill-extrusion-color",col);
   map.setFilter("bldg-over",[">",HGT,over?b.over:1e9]);
-  const d3=b.on&&b.d3; $("#bHint").textContent=d3?"Right-drag, or Ctrl-drag, to turn and tilt. On a touchscreen, twist or slide two fingers. Drag the compass to do both.":"From zoom 15. Roof heights from NYC Open Data Building Footprints.";
+  const d3=b.on&&b.d3; $("#bHint").textContent=d3?"Right-drag, or Ctrl-drag, to turn and tilt. On a touchscreen, twist or slide two fingers. Drag the compass to do both.":"From zoom 15. Roof heights from NYC Open Data Building Footprints; land use and units from MapPLUTO 26v2.";
   if (d3){ map.setMaxPitch(85); map.dragRotate.enable(); map.touchPitch.enable(); map.touchZoomRotate.enableRotation(); map.keyboard.enable();
     if (!navRot){ navRot=new maplibregl.NavigationControl({showZoom:false,visualizePitch:true}); map.addControl(navRot,"top-left"); }
     if (map.getPitch()<20) map.easeTo({pitch:55,zoom:Math.max(map.getZoom(),BLDG_Z+0.5),duration:600}); }
@@ -1500,6 +1504,8 @@ function renderBldgLegend(){
   const ov=b.on&&b.over>0?[[OVER_COLOR,`Taller than ${fmt(b.over)} ft`]]:[];
   let rows=[];
   if (b.on&&b.color==="y") rows=BY_STOPS.map((s,k)=>[BY_COLORS[k],k===0?`Before ${BY_STOPS[1]}`:k===BY_STOPS.length-1?`${s} or later`:`${s}–${BY_STOPS[k+1]-1}`]).concat([[B_NONE,"No year"]]);
+  else if (b.on&&b.color==="lu"&&st.P) rows=st.P.dict.lu.map((t,i)=>[LU_COLORS[i],t]).concat([[B_NONE,"No lot match"]]);
+  else if (b.on&&b.color==="ub") rows=[[UB_ZERO,"0 units"],...ubGroups().map((g,k)=>[UB_MAP[k],groupLabel(g)]),[B_NONE,"No lot match"]];
   else if (b.on&&b.color==="h") rows=BH_STOPS.map((s,k)=>[BH_COLORS[k],k===BH_STOPS.length-1?`${s}+ ft`:`${s}–${BH_STOPS[k+1]} ft`]).concat([[B_NONE,"No height"]]);
   el.innerHTML=rows.concat(ov).map(([c,t])=>`<div class="lg"><i style="background:${c}"></i>${esc(t)}</div>`).join("");
 }
