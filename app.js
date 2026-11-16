@@ -821,7 +821,6 @@ const kvHTML=pairs=>`<div class="kv">${pairs.map(([k,v])=>{ const n=NIL.test(Str
 const FF_FILE="data/factfinder.json.gz";
 const FF_BANDS=["Under 5","5–9","10–14","15–19","20–24","25–29","30–34","35–39","40–44","45–49","50–54","55–59","60–64","65–69","70–74","75–79","80–84","85 & over"];
 const FF_RACE=["Hispanic","White non-Hispanic","Black non-Hispanic","Asian non-Hispanic","Other non-Hispanic","Two or more races, non-Hispanic"];
-const FF_RACE_C=["#E0913B","#7E9CB8","#6B4E9B","#3C8D6E","#B7A98B","#C66A8A"];
 const FF_ACS=[["Median household income","$"],["People below the poverty line","%"],["Homes that are rented","%"],["Median gross rent","$"],["Renters paying 30% or more of income on rent","%"],
   ["Renters paying 50% or more of income on rent","%"],["Born outside the US","%"],["Adults 25+ with a bachelor's degree or more","%"],["Unemployment rate","%"],["Households without a car","%"],["Workers who commute by transit","%"]];
 function needFF(){ if (st.ff||st.ffErr) return; st.ff=fetchBytes(FF_FILE).then(gunzip).then(u=>{ st.ff=JSON.parse(new TextDecoder().decode(u)); renderProfile(); })
@@ -836,13 +835,13 @@ function ffSpecs(specs){
   const F=st.ff, e=F.a[sel.kind+":"+sel.code], N=F.nyc;
   if (!e){ specs.pop={title:"People (2020 Census)",placeholder:`FactFinder has no data for this ${name}.`}; return; }
   if (e.d&&e.d.b[0]){ const [pop,age,hh,hsz,hu,vac,pop10]=e.d.b, [npop,nage,,nhsz,,,npop10]=N.d.b;
-    const tile=(k,v,sub)=>`<div class="tile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, ch=(a,b)=>a&&b?`${a>=b?"+":""}${fmt((a/b-1)*100,1)}% since 2010`:"";
-    const top=`<div class="tiles">${tile("Population",fmt(pop),ch(pop,pop10))}${tile("Median age",fmt(age,1),`NYC ${fmt(nage,1)}`)}${tile("Households",fmt(hh),`${fmt(hsz,2)} people each · NYC ${fmt(nhsz,2)}`)}</div>`;
+    const tile=(k,v,sub)=>`<div class="ftile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, ch=(a,b)=>a&&b?`${a>=b?"+":""}${fmt((a/b-1)*100,1)}% since 2010`:"";
+    const top=`<div class="ftiles">${tile("Population",fmt(pop),ch(pop,pop10))}${tile("Median age",fmt(age,1),`NYC ${fmt(nage,1)}`)}${tile("Households",fmt(hh),`${fmt(hsz,2)} people each · NYC ${fmt(nhsz,2)}`)}</div>`;
     const mx=Math.max(...e.d.pyr.flat(),...N.d.pyr.flat())||1, w=v=>((v||0)/mx*100).toFixed(1);
     const pyr=`<div class="ffcap"><span>Age and sex</span><span class="fflg"><i class="m"></i>Male <i class="f"></i>Female <i class="dot"></i>NYC</span></div><div class="pyr">${FF_BANDS.map((b,k)=>k).reverse().map(k=>{ const m=e.d.pyr[0][k], f=e.d.pyr[1][k], nm=N.d.pyr[0][k], nf=N.d.pyr[1][k];
       return `<div class="pr" data-k="${FF_BANDS[k]}" title="${FF_BANDS[k]}: male ${ffPct(m)}, female ${ffPct(f)} of everyone here (NYC ${ffPct(nm)} and ${ffPct(nf)})"><span class="pl"><i class="m" style="width:${w(m)}%"></i><b class="dot" style="right:${w(nm)}%"></b></span><span class="pk">${FF_BANDS[k]}</span><span class="pf"><i class="f" style="width:${w(f)}%"></i><b class="dot" style="left:${w(nf)}%"></b></span></div>`; }).join("")}</div>`;
     const rmx=Math.max(...e.d.race,...N.d.race)||1;
-    const race=`<div class="ffcap"><span>Race and Hispanic origin</span><span class="fflg"><i class="dot"></i>NYC</span></div><div class="ffbars">${FF_RACE.map((t,k)=>`<div class="fb" title="${t}: ${ffPct(e.d.race[k])} here, ${ffPct(N.d.race[k])} in NYC"><span class="fbl">${t}</span><span class="fbt"><i style="width:${((e.d.race[k]||0)/rmx*100).toFixed(1)}%;background:${FF_RACE_C[k]}"></i><b class="dot" style="left:${((N.d.race[k]||0)/rmx*100).toFixed(1)}%"></b></span><span class="fbv">${ffPct(e.d.race[k])}</span></div>`).join("")}</div>`;
+    const race=`<div class="ffcap"><span>Race and Hispanic origin</span><span class="fflg"><i class="dot"></i>NYC</span></div><div class="ffbars">${FF_RACE.map((t,k)=>`<div class="fb" title="${t}: ${ffPct(e.d.race[k])} here, ${ffPct(N.d.race[k])} in NYC"><span class="fbl">${t}</span><span class="fbt"><i style="width:${((e.d.race[k]||0)/rmx*100).toFixed(1)}%"></i><b class="dot" style="left:${((N.d.race[k]||0)/rmx*100).toFixed(1)}%"></b></span><span class="fbv">${ffPct(e.d.race[k])}</span></div>`).join("")}</div>`;
     specs.pop={title:"People (2020 Census)",html:top+pyr+race+kvHTML([["Homes",fmt(hu)],["Empty homes",hu?`${fmt(vac)} (${fmt(vac/hu*100,1)}%)`:"—"]])+link}; }
   else specs.pop={title:"People (2020 Census)",placeholder:`The 2020 Census has no population for this ${name}.`};
   if (e.a){ const cols="grid-template-columns:minmax(0,1fr) 92px 64px"; let weak=false;
@@ -887,11 +886,11 @@ function sectionSpecs(S){
     kv:[["Mean built FAR",fmt(S.meanBuilt,2)],["Median built FAR",fmt(S.medBuilt,2)],["Floor area built",fmt(S.builtFA)+" sq ft"],
         ["Mean maximum FAR","—"],["Mean unused FAR","—"],["Floor area allowed","—"],["Share of allowed floor area built","—"],["Underbuilt lots","—"],["Overbuilt lots","—"]]};
   else { const fcRows=P.dict.fc.map((k,i)=>[FC_COLORS[i],k,pct(S.fcL[i],S.filtered),S.fcL[i]]).filter(r=>r[3]);
-    const tile=(k,v,sub)=>`<div class="tile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, bmax=Math.max(S.builtFA,S.maxFA)||1;
+    const tile=(k,v,sub)=>`<div class="ftile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, bmax=Math.max(S.builtFA,S.maxFA)||1;
     const fbar=(k,v,c)=>`<div class="fabar"><span>${k}</span><i><em style="width:${(v/bmax*100).toFixed(2)}%;background:${c}"></em></i><b>${fmt(v/1e6,v<1e7?2:1)}M sq ft</b></div>`;
     specs.fc={title:"Zoning capacity (FAR)",barCap:"Share of analyzed lots",cnt:true,
       tiles:[["Built FAR",fmt(S.meanBuilt,2),`mean · median ${fmt(S.medBuilt,2)}`],["Maximum FAR",fmt(S.meanMax,2),`mean · median ${fmt(S.medMax,2)}`],["FAR left",fmt(S.meanDiff,2),`mean · median ${fmt(S.medDiff,2)}`]],
-      top:`<div class="tiles">${tile("Built FAR",fmt(S.meanBuilt,2),`mean · median ${fmt(S.medBuilt,2)}`)}${tile("Maximum FAR",fmt(S.meanMax,2),`mean · median ${fmt(S.medMax,2)}`)}${tile("FAR left",fmt(S.meanDiff,2),`mean · median ${fmt(S.medDiff,2)}`)}</div>`+
+      top:`<div class="ftiles">${tile("Built FAR",fmt(S.meanBuilt,2),`mean · median ${fmt(S.medBuilt,2)}`)}${tile("Maximum FAR",fmt(S.meanMax,2),`mean · median ${fmt(S.medMax,2)}`)}${tile("FAR left",fmt(S.meanDiff,2),`mean · median ${fmt(S.medDiff,2)}`)}</div>`+
         `<div class="fabars">${fbar("Floor area built",S.builtFA,"#5B6B7B")}${fbar("Floor area allowed",S.maxFA,"#0B5D3B")}</div>`+
         `<p class="fanote">${S.maxFA?`Built floor area is ${fmt(S.builtFA/S.maxFA*100,1)}% of what the analyzed lots are allowed. `:""}Underbuilt lots could add ${fmt(S.roomFA/1e6,1)}M sq ft.</p>`,
       charts:[{cap:"Analyzed lots",segs:fcRows.map(r=>seg(r[1],r[0],r[3],S.filtered,"of analyzed lots",fmt(r[3])+" lots"))}],

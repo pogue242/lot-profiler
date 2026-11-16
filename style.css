@@ -660,11 +660,11 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .ibtn:hover,.ibtn.on{border-color:var(--blue);color:var(--blue);background:var(--tint)}
 #aboutPop{position:fixed;z-index:60;background:#fff;color:var(--ink);border:1px solid var(--hair);border-radius:6px;box-shadow:0 4px 16px rgba(20,38,59,.18);padding:8px 10px;font-size:12.5px;line-height:1.45}
 #aboutPop[hidden]{display:none}
-.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px}
-.tile{border:1px solid var(--hair);border-radius:4px;padding:6px 8px;display:flex;flex-direction:column;gap:1px;min-width:0}
-.tile small{font-size:11px;color:var(--ink2)}
-.tile b{font-size:19px;font-variant-numeric:tabular-nums}
-.tile span{font-size:10.5px;color:var(--ink2)}
+.ftiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.ftile{border:1px solid var(--hair);border-radius:4px;padding:6px 8px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.ftile small{font-size:11px;color:var(--ink2)}
+.ftile b{font-size:19px;font-variant-numeric:tabular-nums}
+.ftile span{font-size:10.5px;color:var(--ink2)}
 .fabars{display:grid;gap:4px;margin-bottom:4px}
 .fabar{display:grid;grid-template-columns:104px minmax(0,1fr) 92px;align-items:center;gap:8px;font-size:12px}
 .fabar i{height:10px;background:var(--row);display:block}
@@ -696,3 +696,4 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .ffacs .val.nyc{color:var(--ink2)}
 .ffacs .r .nm{white-space:normal;line-height:1.3}
 .ffsrc{font-size:11.5px;color:var(--ink2);margin:8px 0 0}
+.fbt i{background:#7E9CB8}
