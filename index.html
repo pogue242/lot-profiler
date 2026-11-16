@@ -81,6 +81,17 @@
       </div>
       <div id="mapRules" class="rules"></div>
       </details>
+      <details id="bldgOpts">
+        <summary>Building Outlines</summary>
+        <label class="lotsw" title="Turn building outlines on or off"><input type="checkbox" id="bOn"><span class="tg" aria-hidden="true"></span>Show buildings</label>
+        <label class="lotsw" title="Show buildings at their roof height"><input type="checkbox" id="b3d"><span class="tg" aria-hidden="true"></span>3D</label>
+        <label class="cb">Color buildings by
+          <select id="bColor"><option value="h">Roof height</option><option value="y">Year built</option><option value="lu">Land use of the lot</option><option value="ub">Units per building on the lot</option><option value="gray">One color</option></select>
+        </label>
+        <label class="rrow">Highlight taller than <input id="bOver" type="number" min="0" step="5" placeholder="ft" style="width:72px"> ft</label>
+        <div id="bSw" class="bsw"></div>
+        <p class="lstatus" id="bHint">From zoom 15. Roof heights from NYC Open Data Building Footprints; land use and units from MapPLUTO 26v2.</p>
+      </details>
       <details id="zonOpts">
         <summary>Zoning Map</summary>
         <div class="checks one sw">

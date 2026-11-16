@@ -85,9 +85,9 @@ const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="bac
 const st = {
   releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
   walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
-  rules:[], ruleForm:null,
+  rules:[], ruleForm:null, bldg:{on:false,color:"h",d3:false,over:0},
   opts:{park:"whole", style:"pies", size:"s", rules:[], ub0:false, luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
-        order:["lu","ub","fl","fc","zc","age","zone","mix","list"]},
+        order:["pop","acs","lu","ub","fl","fc","zc","age","zone","mix","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
        colorsOff:false, ubDiv:(()=>{ try{ const d=JSON.parse(localStorage.getItem("lp-ub-div")||"null"); if (Array.isArray(d)&&d.length===8) return d.map(Boolean); }catch(_){} return [...UB_DIV0]; })(),
@@ -818,6 +818,40 @@ function tableHTML(headers, rows, key, cnt){
 }
 const NIL=/^(None|—|No|[—\s\/]+)$/;
 const kvHTML=pairs=>`<div class="kv">${pairs.map(([k,v])=>{ const n=NIL.test(String(v).trim())?" class=\"nil\"":""; return `<span${n}>${k}</span><b${n}>${v}</b>`; }).join("")}</div>`;
+const FF_FILE="data/factfinder.json.gz";
+const FF_BANDS=["Under 5","5–9","10–14","15–19","20–24","25–29","30–34","35–39","40–44","45–49","50–54","55–59","60–64","65–69","70–74","75–79","80–84","85 & over"];
+const FF_RACE=["Hispanic","White non-Hispanic","Black non-Hispanic","Asian non-Hispanic","Other non-Hispanic","Two or more races, non-Hispanic"];
+const FF_RACE_C=["#E0913B","#7E9CB8","#6B4E9B","#3C8D6E","#B7A98B","#C66A8A"];
+const FF_ACS=[["Median household income","$"],["People below the poverty line","%"],["Homes that are rented","%"],["Median gross rent","$"],["Renters paying 30% or more of income on rent","%"],
+  ["Renters paying 50% or more of income on rent","%"],["Born outside the US","%"],["Adults 25+ with a bachelor's degree or more","%"],["Unemployment rate","%"],["Households without a car","%"],["Workers who commute by transit","%"]];
+function needFF(){ if (st.ff||st.ffErr) return; st.ff=fetchBytes(FF_FILE).then(gunzip).then(u=>{ st.ff=JSON.parse(new TextDecoder().decode(u)); renderProfile(); })
+  .catch(e=>{ st.ffErr=String(e&&e.message||e); st.ff=null; renderProfile(); }); }
+const ffPct=v=>v==null?"—":fmt(v*100,1)+"%";
+const ffVal=(v,k)=>v==null?"—":k==="$"?"$"+fmt(v):ffPct(v);
+function ffSpecs(specs){
+  const sel=st.sel; if (!sel||sel.type!=="area"||(sel.kind!=="nta"&&sel.kind!=="tract")) return;
+  const name=sel.kind==="nta"?"neighborhood":"tract", link=`<p class="ffsrc">Source: NYC DCP Population FactFinder. <a href="https://popfactfinder.planning.nyc.gov/explorer/${sel.kind==="nta"?"ntas":"tracts"}/${encodeURIComponent(sel.code)}" target="_blank" rel="noopener">Open in FactFinder ↗</a></p>`;
+  if (!st.ff||st.ff instanceof Promise){ needFF(); const ph=st.ffErr?"Population data couldn't be loaded.":"Loading population data…";
+    specs.pop={title:"People (2020 Census)",placeholder:ph}; specs.acs={title:"Households and income (ACS)",placeholder:ph}; return; }
+  const F=st.ff, e=F.a[sel.kind+":"+sel.code], N=F.nyc;
+  if (!e){ specs.pop={title:"People (2020 Census)",placeholder:`FactFinder has no data for this ${name}.`}; return; }
+  if (e.d&&e.d.b[0]){ const [pop,age,hh,hsz,hu,vac,pop10]=e.d.b, [npop,nage,,nhsz,,,npop10]=N.d.b;
+    const tile=(k,v,sub)=>`<div class="tile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, ch=(a,b)=>a&&b?`${a>=b?"+":""}${fmt((a/b-1)*100,1)}% since 2010`:"";
+    const top=`<div class="tiles">${tile("Population",fmt(pop),ch(pop,pop10))}${tile("Median age",fmt(age,1),`NYC ${fmt(nage,1)}`)}${tile("Households",fmt(hh),`${fmt(hsz,2)} people each · NYC ${fmt(nhsz,2)}`)}</div>`;
+    const mx=Math.max(...e.d.pyr.flat(),...N.d.pyr.flat())||1, w=v=>((v||0)/mx*100).toFixed(1);
+    const pyr=`<div class="ffcap"><span>Age and sex</span><span class="fflg"><i class="m"></i>Male <i class="f"></i>Female <i class="dot"></i>NYC</span></div><div class="pyr">${FF_BANDS.map((b,k)=>k).reverse().map(k=>{ const m=e.d.pyr[0][k], f=e.d.pyr[1][k], nm=N.d.pyr[0][k], nf=N.d.pyr[1][k];
+      return `<div class="pr" data-k="${FF_BANDS[k]}" title="${FF_BANDS[k]}: male ${ffPct(m)}, female ${ffPct(f)} of everyone here (NYC ${ffPct(nm)} and ${ffPct(nf)})"><span class="pl"><i class="m" style="width:${w(m)}%"></i><b class="dot" style="right:${w(nm)}%"></b></span><span class="pk">${FF_BANDS[k]}</span><span class="pf"><i class="f" style="width:${w(f)}%"></i><b class="dot" style="left:${w(nf)}%"></b></span></div>`; }).join("")}</div>`;
+    const rmx=Math.max(...e.d.race,...N.d.race)||1;
+    const race=`<div class="ffcap"><span>Race and Hispanic origin</span><span class="fflg"><i class="dot"></i>NYC</span></div><div class="ffbars">${FF_RACE.map((t,k)=>`<div class="fb" title="${t}: ${ffPct(e.d.race[k])} here, ${ffPct(N.d.race[k])} in NYC"><span class="fbl">${t}</span><span class="fbt"><i style="width:${((e.d.race[k]||0)/rmx*100).toFixed(1)}%;background:${FF_RACE_C[k]}"></i><b class="dot" style="left:${((N.d.race[k]||0)/rmx*100).toFixed(1)}%"></b></span><span class="fbv">${ffPct(e.d.race[k])}</span></div>`).join("")}</div>`;
+    specs.pop={title:"People (2020 Census)",html:top+pyr+race+kvHTML([["Homes",fmt(hu)],["Empty homes",hu?`${fmt(vac)} (${fmt(vac/hu*100,1)}%)`:"—"]])+link}; }
+  else specs.pop={title:"People (2020 Census)",placeholder:`The 2020 Census has no population for this ${name}.`};
+  if (e.a){ const cols="grid-template-columns:minmax(0,1fr) 92px 64px"; let weak=false;
+    const rows=FF_ACS.map(([t,k],i)=>{ const [v,m,ok]=e.a[i]; if (v!=null&&!ok) weak=true;
+      return `<div class="r" style="${cols}"><span class="nm">${t}</span><span class="val${v!=null&&!ok?" weak":""}" title="${m!=null?`Margin of error ± ${k==="$"?"$"+fmt(m):fmt(m*100,1)+" points"}`:""}">${ffVal(v,k)}${v!=null&&!ok?"*":""}</span><span class="val nyc">${ffVal(N.a[i],k)}</span></div>`; }).join("");
+    specs.acs={title:`Households and income (ACS ${F.meta.acs.slice(0,9)})`,html:`<div class="rows ffacs"><div class="r hd" style="${cols}"><span class="nm">Estimate</span><span class="val">Here</span><span class="val">NYC</span></div>${rows}</div>`+
+      `<p class="ffsrc">${weak?"* Not reliable: the margin of error is large compared with the estimate. ":""}Hover a number for its margin of error. ${F.meta.acs}.</p>`+link}; }
+  else specs.acs={title:"Households and income (ACS)",placeholder:`FactFinder doesn't publish survey estimates for this ${name}.`};
+}
 function sectionSpecs(S){
   const P=st.P, acres=v=>fmt(v/43560,1)+" acres", specs={};
   const luRows=[]; let oL=0,oA=0,oU=0; const order=[...Array(12).keys()];
@@ -885,6 +919,7 @@ function sectionSpecs(S){
   if (S.ids.length>1 && S.ids.length<=500 && st.sel.type!=="area")
     specs.list={title:"Lots",soft:`${fmt(S.ids.length)} lots, click one for its record`,
       lots:S.ids.slice().sort((a,b)=>(addrOf(P,a)||"~").localeCompare(addrOf(P,b)||"~",undefined,{numeric:true}))};
+  ffSpecs(specs);
   hideSpecs(specs); sortSpecs(specs);
   return specs;
 }
@@ -935,7 +970,10 @@ const ABOUT={
   trace:"How the maximum was worked out: which districts the lot is in, which rules apply and the final number.",
   districts:"The community district and council district the lot is in.",
   misc:"Landmark status, flood zone and assessed value.",
-  links:"Other city maps and records for this lot."};
+  links:"Other city maps and records for this lot.",
+  pop:"Who lives here, from the 2020 Census through Population FactFinder. The bars show each age group's share of everyone here; the dots show the same share for all of New York City.",
+  acs:"Survey estimates from the Census Bureau's American Community Survey, averaged over five years. Small areas have wide margins of error, so treat tract numbers as rough.",
+  bldgs:"Each building outline on the lot, with its roof height above the ground and the year it was built, from NYC Open Data. Turn outlines on under Map layers."};
 function aboutOff(){ const d=$("#aboutPop"); if (d) d.hidden=true; $$(".ibtn.on").forEach(b=>b.classList.remove("on")); }
 function aboutPop(btn){
   let d=$("#aboutPop"); const was=d&&!d.hidden&&d.dataset.k===btn.dataset.about;
@@ -1023,6 +1061,7 @@ function lotSpecs(i){
     if (q.includes(2)) msg.push(`The unit count (${fmt(P.units[i])}) doesn't fit: ${Object.entries(DQ_FLAG_TEXT).filter(([b2])=>P.qa.flags[k]&+b2).map(([,t])=>t).join("; ")}.`);
     if (msg.length) specs.check={title:"Data check", warn:msg.join(" ")}; }
   specs.far={title:"Floor area ratio", kv:fkv, about:"far"};
+  if (st.bldg.on){ specs.bldgs={title:"Building outlines", html:`<div id="bldgList"><p class="notyet">Loading…</p></div>`}; setTimeout(()=>fillBuildings(Math.round(P.bbl[i])),0); }
   if (F && R && (R.far_trace||R.split_shares||R.far_use)) specs.trace={title:"How this FAR was calculated", kv:[
     ...(R.far_use?[["Use the maximum is for",esc(R.far_use)]]:[]),
     ...(P.zc[i]<(P.dict.zc||[]).length?[["Use and bulk vs zoning",esc(P.dict.zc[P.zc[i]])]]:[]),
@@ -1423,6 +1462,72 @@ function setLayerMode(m){ const z=m==="zoning", cb=$('[data-zon="zd"]'); st.map.
   if (!z&&st.zpeek){ st.zpeek=null; renderProfile(); } }
 function setFillOpacity(){ if (map.getLayer("zd-hit")) map.setPaintProperty("zd-hit","fill-opacity",zdFillOp()); map.setPaintProperty("lots","fill-opacity",lotOpacity()); map.setPaintProperty("blocks-fill","fill-opacity",blockOpacity()); topOpacities(); }
 const vis=(id,on)=>{ if(map&&map.getLayer(id)) map.setLayoutProperty(id,"visibility",on?"visible":"none"); };
+const BLDG_FILE="data/buildings_2026-10-30.pmtiles", BLDG_Z=15;
+const BH_STOPS=[0,20,40,75,150,300,600], BH_COLORS=["#FFF3D1","#FDD49A","#F7A35F","#E26A3B","#BD3B2B","#85192D","#470C2E"];
+const BY_STOPS=[0,1900,1930,1960,1990,2010], BY_COLORS=["#3B2D6E","#3E5C9A","#3A8A9E","#4CB38A","#9BD15B","#F2E64B"];
+const OVER_COLOR="#D6006E", MAX_H=2000, HGT=["case",[">",["get","h"],MAX_H],0,["get","h"]], B_NONE="#D9DDE1";
+const bSteps=(get,S,C)=>["step",get,C[0],...S.slice(1).flatMap((s,k)=>[s,C[k+1]])];
+const bGet=v=>["coalesce",["get",v],-1];
+function bColorExpr(){ const c=st.bldg.color;
+  if (c==="gray") return "#C9CDD2";
+  if (c==="y") return ["case",["<=",["get","y"],0],B_NONE,bSteps(["get","y"],BY_STOPS,BY_COLORS)];
+  if (c==="lu"){ const m=["match",bGet("lu")]; LU_COLORS.forEach((x,i)=>m.push(i,x)); m.push(B_NONE); return m; }
+  if (c==="ub"){ const k=ubIndex(), m=["match",bGet("ub")]; for (let i=0;i<9;i++) m.push(i,UB_MAP[k[i]]); m.push(UB_NONE,UB_ZERO); m.push(B_NONE); return m; }
+  return ["case",[">",["get","h"],MAX_H],B_NONE,bSteps(["get","h"],BH_STOPS,BH_COLORS)]; }
+let navRot=null;
+function addBldgLayers(){
+  const before=["zd-hit","tract-fill",st.base&&st.base.before].find(id=>id&&map.getLayer(id)), add=l=>map.addLayer(l,before);
+  map.addSource("bldg",{type:"vector",url:pmURL(BLDG_FILE),attribution:"Buildings: NYC Open Data"});
+  const bsrc={source:"bldg","source-layer":"bldg",minzoom:BLDG_Z};
+  add({id:"bldg-fill",type:"fill",...bsrc,layout:{visibility:"none"},paint:{"fill-color":bColorExpr(),"fill-opacity":0.9}});
+  add({id:"bldg-line",type:"line",...bsrc,layout:{visibility:"none"},paint:{"line-color":"#3A3F45","line-width":["interpolate",["linear"],["zoom"],15,0.3,18,0.9],"line-opacity":0.75}});
+  add({id:"bldg-over",type:"line",...bsrc,filter:[">",["get","h"],1e9],layout:{visibility:"none"},paint:{"line-color":OVER_COLOR,"line-width":["interpolate",["linear"],["zoom"],15,1.4,18,3]}});
+  add({id:"bldg-3d",type:"fill-extrusion",...bsrc,layout:{visibility:"none"},paint:{"fill-extrusion-color":bColorExpr(),"fill-extrusion-height":["*",HGT,0.3048],"fill-extrusion-opacity":0.92}});
+  add({id:"bldg-hl",type:"line",...bsrc,filter:["==",["get","b"],st.peek!=null?st.peek:-1],layout:{visibility:"none"},paint:{"line-color":"#14263B","line-width":["interpolate",["linear"],["zoom"],15,1.6,18,3]}});
+}
+function applyBldg(){
+  const b=st.bldg; renderBldgLegend(); if (!map||!map.getLayer("lots")) return;
+  if (!map.getLayer("bldg-fill")){ if (!b.on) return; addBldgLayers(); }
+  const c=bColorExpr(), over=b.over>0, col=over?["case",[">",HGT,b.over],OVER_COLOR,c]:c;
+  vis("bldg-fill",b.on&&!b.d3); vis("bldg-line",b.on&&!b.d3); vis("bldg-3d",b.on&&b.d3); vis("bldg-over",b.on&&over&&!b.d3); vis("bldg-hl",b.on);
+  map.setPaintProperty("bldg-fill","fill-color",col); map.setPaintProperty("bldg-3d","fill-extrusion-color",col);
+  map.setFilter("bldg-over",[">",HGT,over?b.over:1e9]);
+  const d3=b.on&&b.d3; $("#bHint").textContent=d3?"Right-drag, or Ctrl-drag, to turn and tilt. On a touchscreen, twist or slide two fingers. Drag the compass to do both.":"From zoom 15. Roof heights from NYC Open Data Building Footprints; land use and units from MapPLUTO 26v2.";
+  if (d3){ map.setMaxPitch(85); map.dragRotate.enable(); map.touchPitch.enable(); map.touchZoomRotate.enableRotation(); map.keyboard.enable();
+    if (!navRot){ navRot=new maplibregl.NavigationControl({showZoom:false,visualizePitch:true}); map.addControl(navRot,"top-left"); }
+    if (map.getPitch()<20) map.easeTo({pitch:55,zoom:Math.max(map.getZoom(),BLDG_Z+0.5),duration:600}); }
+  else { if (navRot){ map.removeControl(navRot); navRot=null; } map.dragRotate.disable(); map.touchPitch.disable(); map.touchZoomRotate.disableRotation();
+    if (map.getPitch()>0||map.getBearing()!==0){ map.easeTo({pitch:0,bearing:0,duration:400}); map.once("moveend",()=>{ if (!(st.bldg.on&&st.bldg.d3)) map.setMaxPitch(0); }); } else map.setMaxPitch(0); }
+}
+function renderBldgLegend(){
+  const b=st.bldg, el=$("#bSw"); if (!el) return;
+  const ov=b.on&&b.over>0?[[OVER_COLOR,`Taller than ${fmt(b.over)} ft`]]:[];
+  let rows=[];
+  if (b.on&&b.color==="y") rows=BY_STOPS.map((s,k)=>[BY_COLORS[k],k===0?`Before ${BY_STOPS[1]}`:k===BY_STOPS.length-1?`${s} or later`:`${s}–${BY_STOPS[k+1]-1}`]).concat([[B_NONE,"No year"]]);
+  else if (b.on&&b.color==="h") rows=BH_STOPS.map((s,k)=>[BH_COLORS[k],k===BH_STOPS.length-1?`${s}+ ft`:`${s}–${BH_STOPS[k+1]} ft`]).concat([[B_NONE,"No height"]]);
+  else if (b.on&&b.color==="lu"&&st.P) rows=st.P.dict.lu.map((t,i)=>[LU_COLORS[i],t]).concat([[B_NONE,"No lot match"]]);
+  else if (b.on&&b.color==="ub") rows=[[UB_ZERO,"0 units"],...ubGroups().map((g,k)=>[UB_MAP[k],groupLabel(g)]),[B_NONE,"No lot match"]];
+  el.innerHTML=rows.concat(ov).map(([c,t])=>`<div class="lg"><i style="background:${c}"></i>${esc(t)}</div>`).join("");
+}
+function bldgsOf(bb){
+  if (!map||!map.getSource("bldg")) return [];
+  const seen=new Map();
+  for (const f of map.querySourceFeatures("bldg",{sourceLayer:"bldg",filter:["==",["get","b"],bb]})){ const p=f.properties, k=p.n||`${p.h}/${p.y}`; if (!seen.has(k)) seen.set(k,p); }
+  return [...seen.values()].sort((a,b)=>b.h-a.h);
+}
+const FEATURE={5100:"under construction",5110:"garage",2110:"skybridge"};
+function fillBuildings(bb,tries=0){
+  const el=document.getElementById("bldgList"); if (!el||!map) return;
+  if (map.getLayer("bldg-hl")) map.setFilter("bldg-hl",["==",["get","b"],bb]);
+  const wait=t=>{ el.innerHTML=`<p class="notyet">${t}</p>`; };
+  if (map.getZoom()<BLDG_Z-0.01){ wait("Zoom in closer to list this lot's buildings."); map.once("idle",()=>fillBuildings(bb)); return; }
+  const L=bldgsOf(bb);
+  if (!L.length){ if (!map.areTilesLoaded()||tries<2){ wait("Loading…"); map.once("idle",()=>fillBuildings(bb,tries+1)); map.triggerRepaint(); } else wait("No building outlines on this lot."); return; }
+  const over=st.bldg.over>0?st.bldg.over:0, ok=L.filter(p=>p.h>0&&p.h<=MAX_H), tall=ok.length?ok[0].h:0, cols="grid-template-columns:minmax(0,1fr) 64px 52px";
+  el.innerHTML=`<div class="rows lotlist"><div class="r hd" style="${cols}"><span class="nm">Building</span><span class="val">Height</span><span class="val">Built</span></div>${L.map(p=>`<div class="r" style="${cols}"><span class="nm">${esc(p.nm||(p.n?"BIN "+p.n:"Building"))}${p.f&&FEATURE[p.f]?` <span class="soft">(${esc(FEATURE[p.f])})</span>`:""}</span><span class="val"${over&&p.h>over&&p.h<=MAX_H?` style="color:${OVER_COLOR};font-weight:700"`:""}>${p.h>MAX_H?`<span title="Listed as ${fmt(p.h)} ft, which can't be right">?</span>`:p.h?fmt(p.h)+" ft":"—"}</span><span class="val">${p.y||"—"}</span></div>`).join("")}</div>`+
+    kvHTML([["Buildings on the lot",fmt(L.length)],["Tallest roof",tall?fmt(tall)+" ft":"—"]]);
+}
+
 const OVL=[["mih","Mandatory Inclusionary Housing","#D9480F"],["ih","Inclusionary Housing designated areas","#B8860B"],["tz","Transit zones","#2B8CBE"],["fr","FRESH food store areas","#5AA02C"],
   ["ed","E-designations","#5B4636"],["ldg","Lower Density Growth Management Areas","#8C6D46"],["cz","Coastal Zone","#1F78B4"],["wap","Waterfront Access Plans","#0E7C86"],
   ["uwa","Upland waterfront areas","#6BAED6"],["apj","Appendix J designated M districts","#C51B7D"]];
@@ -1500,7 +1605,7 @@ function initMap(style){
   const fonts=((base.layers||[]).find(l=>l.type==="symbol"&&l.layout&&l.layout["text-font"])||{layout:{}}).layout["text-font"];
   st.font=["Open Sans Bold"]; void fonts;
   map=new maplibregl.Map({container:"map",bounds:st.P.bbox,fitBoundsOptions:{padding:40},style:base,
-    fadeDuration:0,boxZoom:false,dragRotate:false,pitchWithRotate:false,touchPitch:false,maxPitch:0,renderWorldCopies:false,attributionControl:{compact:true},minZoom:9,maxZoom:19.5});
+    fadeDuration:0,boxZoom:false,dragRotate:false,pitchWithRotate:true,touchPitch:false,maxPitch:0,renderWorldCopies:false,attributionControl:{compact:true},minZoom:9,maxZoom:19.5});
   map.touchZoomRotate.disableRotation();
   map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-left");
   let glyphsOff=false;
@@ -1628,7 +1733,7 @@ function initMap(style){
     add({id:"pl-draft",type:"circle",source:"plines",filter:["all",["==",["geometry-type"],"Point"],["get","draft"]],paint:{"circle-radius":5,"circle-color":"#fff","circle-stroke-color":["get","c"],"circle-stroke-width":2.5}},true);
     add({id:"pl-name",type:"symbol",source:"plines",minzoom:12.5,filter:["==",["geometry-type"],"Point"],layout:{"text-field":["get","n"],"text-font":st.font,"text-size":11.5,"text-offset":[0.9,0],"text-anchor":"left","text-optional":true},paint:{"text-color":"#14263B","text-halo-color":"#fff","text-halo-width":1.8}},true);
     drawPLines();
-    styleBlocks(true); renderLegend(); applyMapOpts(); drawSelection(); if (st.T) drawTransit();
+    styleBlocks(true); renderLegend(); applyMapOpts(); applyBldg(); drawSelection(); if (st.T) drawTransit();
     map.on("moveend",updateStationLabels);
     let pfT=null; map.on("idle",()=>{ clearTimeout(pfT); pfT=setTimeout(()=>prefetchGeom(st.P),250); });
     applyLotZoom();
@@ -1648,7 +1753,8 @@ function placeLabels(){ if (map&&map.getSource("nta-label")) map.getSource("nta-
 let peekId=null;
 function setPeekState(i){ if (!map||!map.getSource("lots")) return;
   if (peekId!=null) map.setFeatureState({source:"lots",sourceLayer:"lots",id:peekId},{peek:false});
-  peekId=i; if (i!=null) map.setFeatureState({source:"lots",sourceLayer:"lots",id:i},{peek:true}); }
+  peekId=i; if (i!=null) map.setFeatureState({source:"lots",sourceLayer:"lots",id:i},{peek:true});
+  if (map.getLayer("bldg-hl")) map.setFilter("bldg-hl",["==",["get","b"],i!=null?Math.round(st.P.bbl[i]):-1]); }
 function drawSelection(){
   st.curIdx = st.sel ? selIndices(st.P,st.sel) : null;
   if (!map||!map.getSource("selo")) return;
@@ -2465,6 +2571,10 @@ function wireOptions(){
     const on=H.has(c); cs.forEach(x=>on?H.delete(x):H.add(x)); restyleLots(); };
   $("#swatches").addEventListener("change",e=>{ if (e.target.id==="ubSplit") st.ubSplit=+e.target.value; const t=e.target.closest("[data-ubfrom]"); if (!t) return;
     const G=ubGroups(), k=+t.dataset.ubfrom, div=[...st.map.ubDiv]; div[G[k][0]-1]=false; div[+t.value-1]=true; setUbDiv(div); });
+  $("#bOn").onchange=e=>{ st.bldg.on=e.target.checked; applyBldg(); renderProfile(); };
+  $("#b3d").onchange=e=>{ st.bldg.d3=e.target.checked; if (st.bldg.d3&&!st.bldg.on){ st.bldg.on=true; $("#bOn").checked=true; renderProfile(); } applyBldg(); };
+  $("#bColor").onchange=e=>{ st.bldg.color=e.target.value; applyBldg(); };
+  $("#bOver").oninput=e=>{ st.bldg.over=Math.max(0,+e.target.value||0); applyBldg(); if (document.getElementById("bldgList")) renderProfile(); };
   $("#lotOn").onchange=e=>{ st.map.colorsOff=!e.target.checked; setFillOpacity(); renderLegend(); };
   const setRange=()=>{ const a=parseFloat($("#rMin").value), b=parseFloat($("#rMax").value); if (Number.isFinite(a)&&Number.isFinite(b)&&b>a){ st.map.range[st.colorBy]=[a,b]; restyleLots(); } };
   $("#rMin").onchange=setRange; $("#rMax").onchange=setRange;
