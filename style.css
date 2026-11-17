@@ -210,13 +210,14 @@ button,select,input{font:inherit;color:inherit}
 #qres li em{font-style:normal;font-size:10.5px;color:#fff;background:#7E8C9A;border-radius:3px;padding:1px 5px;margin-right:6px}
 
 #tools .addb{font-weight:700;color:var(--blue)}
+#tools .addb,#tools #geoBtn{text-align:center;white-space:nowrap}
 #tools .tapm{display:none}
 @media (hover:none){ #tools .tapm{display:block;flex:none;border:0;border-left:1px solid var(--hair);background:#fff;color:var(--ink);font-size:12.5px;padding:0 4px;max-width:118px} }
 #hint .keys{flex-basis:100%;font-size:11.5px;opacity:.85}
 #hint:has(button) .keys{margin-top:-6px}
 @media (min-width:821px){ #hint:not(:has(button)){display:block;width:max-content;line-height:1.3} #hint:not(:has(button))>span{display:block} #hint:not(:has(button))>span+span{margin-top:4px} }
 #hint kbd{font:inherit;font-weight:700}
-#tools .addb.on{background:#FFF1D6;color:#8A5A00;box-shadow:inset 0 -2px 0 #E08A1E}
+#tools .addb.on{background:#E08A1E;color:#fff;box-shadow:none}
 #mapBtns{position:absolute;right:12px;bottom:44px;z-index:5;display:flex;gap:8px;align-items:flex-end}
 #mapBtns button{border:1px solid var(--hair);background:#fff;border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;box-shadow:0 2px 8px rgba(20,38,59,.12);color:var(--ink)}
 #mapBtns button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -287,14 +288,17 @@ button,select,input{font:inherit;color:inherit}
 .clipsel{white-space:nowrap}
 #hint .clipsel select{color:var(--ink);border-color:rgba(255,255,255,.45)}
 
-#tools .caret{padding:0 7px;margin-left:-1px;font-size:11px;min-width:0}
-#clipMenu{position:absolute;z-index:8;width:290px;background:#fff;border:1px solid var(--hair);border-radius:6px;box-shadow:0 6px 18px rgba(20,38,59,.18);padding:6px}
-#clipMenu .cmh{font-weight:700;font-size:13px;padding:4px 8px 6px}
-#clipMenu .cmh small{display:block;font-weight:400;color:var(--ink2);font-size:11.5px}
-#clipMenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 8px 6px 26px;border-radius:4px;cursor:pointer;font:inherit;color:var(--ink);position:relative}
-#clipMenu button:hover{background:var(--row)}
-#clipMenu button.on::before{content:"✓";position:absolute;left:9px;top:6px;color:#1B62A5;font-weight:700}
-#clipMenu button b{display:block;font-size:13px}
+#tools .caret{padding:0 8px 0 1px;font-size:11px;min-width:0}
+#tools button+button.caret{border-left:0}
+#tools button[data-mode=radius]{padding-right:3px}
+#tools button[data-mode=radius].on+.caret{background:var(--blue);color:#fff}
+#clipMenu,#geoMenu{position:absolute;z-index:8;width:290px;background:#fff;border:1px solid var(--hair);border-radius:6px;box-shadow:0 6px 18px rgba(20,38,59,.18);padding:6px}
+#clipMenu .cmh,#geoMenu .cmh{font-weight:700;font-size:13px;padding:4px 8px 6px}
+#clipMenu .cmh small,#geoMenu .cmh small{display:block;font-weight:400;color:var(--ink2);font-size:11.5px}
+#clipMenu button,#geoMenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 8px 6px 26px;border-radius:4px;cursor:pointer;font:inherit;color:var(--ink);position:relative}
+#clipMenu button:hover,#geoMenu button:hover{background:var(--row)}
+#clipMenu button.on::before,#geoMenu button.on::before{content:"✓";position:absolute;left:9px;top:6px;color:#1B62A5;font-weight:700}
+#clipMenu button b,#geoMenu button b{display:block;font-size:13px}
 #clipMenu button b em{font-style:normal;font-weight:400;font-size:11px;color:var(--ink2);margin-left:4px}
 #clipMenu button span{display:block;font-size:12px;color:var(--ink2);line-height:1.35}
 #clipMenu .cmall{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--ink2);padding:6px 8px 2px;border-top:1px solid var(--hair);margin-top:4px}
@@ -434,6 +438,7 @@ button,select,input{font:inherit;color:inherit}
 .rows .r.off{color:#9AA6B2}
 .rows .r.off .nm{text-decoration:line-through}
 .rows .r.off .sw{opacity:.3}
+.ffmiss p{margin:0 0 6px}.ffmiss ul{margin:0 0 6px;padding:0;list-style:none}.ffmiss li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px;padding:3px 0;border-top:1px solid #E3E7EB}.ffmiss .ffact{display:flex;gap:10px}.ffmiss .link{font-size:12px}.ffomit .link{font-size:inherit}
 .hidnote{font-size:11.5px;color:var(--ink2);margin:6px 0 0}
 
 @media (min-width:821px){
@@ -697,3 +702,4 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:
 .ffacs .r .nm{white-space:normal;line-height:1.3}
 .ffsrc{font-size:11.5px;color:var(--ink2);margin:8px 0 0}
 .fbt i{background:#7E9CB8}
+#geoMenu{width:220px}

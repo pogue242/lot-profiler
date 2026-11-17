@@ -40,6 +40,7 @@
       <button data-mode="block" title="Select a tax block; Ctrl-click (⌘ on a Mac) to add more (B)">Block</button>
       <button data-mode="area" title="Select a Neighborhood Tabulation Area (N)">NTAs</button>
       <button data-mode="tract" title="Select a 2020 census tract (T)">Tracts</button>
+      <button id="geoBtn" data-mode="geo" aria-haspopup="true" aria-expanded="false" title="Community districts, CDTAs and boroughs">More areas ▾</button>
       <button data-mode="poly" title="Draw a boundary (D)">Draw</button>
       <button data-mode="radius" title="Radius around a point, entrance or station (R)">Radius</button>
       <button id="clipBtn" class="caret" aria-haspopup="true" aria-expanded="false" title="Lot inclusion rule for radius, walkshed and drawn selections">▾</button>
@@ -47,6 +48,7 @@
       <select id="tapMode" class="tapm" aria-label="What a tap on the map does"><option value="">Tap: select</option><option value="merge">Tap: merge</option><option value="out">Tap: leave out</option></select>
     </div>
     <div id="clipMenu" role="menu" hidden></div>
+    <div id="geoMenu" class="popmenu" role="menu" hidden></div>
     <div id="mapBtns">
       <button id="measBtn" data-mode="measure" title="Measure a distance or an area (M)">Measure</button>
       <button id="mapPng" title="Save the map, with its legend, as a PNG image">Save map image</button>
@@ -231,6 +233,7 @@
   </div>
 </div>
 <div id="toast" role="status" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/polygon-clipping@0.15.7/dist/polygon-clipping.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

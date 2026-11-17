@@ -84,9 +84,9 @@ const bullet = r => `<span class="rb${MTA[r]==="#FCCC0A"?" dark":""}" style="bac
 
 const st = {
   releases:[], packs:new Map(), P:null, C:null, T:null, sels:[], view:"all", addMode:false, tapMode:null, addTo:null, combine:null, prevSel:null, pending:null,
-  walk:{from:"pt",m:804.7}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.7, clip:"touch", base:null, curIdx:null,
+  walk:{from:"pt",m:804.672}, lines:[], draft:null, mode:"view", peek:null, ownerShown:new Set(), colorBy:"lu", radiusPreset:804.672, clip:"touch", geoKind:"cd", base:null, curIdx:null,
   rules:[], ruleForm:null, bldg:{on:false,color:"h",d3:false,over:0},
-  opts:{park:"whole", style:"pies", size:"s", rules:[], ub0:false, luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
+  opts:{park:"part", style:"pies", size:"s", rules:[], ub0:false, luExcl:new Set(), boroExcl:new Set(), dq:{mode:"pluto"}, div:Array(8).fill(true), sort:{}, shut:new Set(["districts","misc","links"]), hideCat:{}, cmpMetric:{}, cmpRel:"cur",
         order:["pop","acs","lu","ub","fl","fc","zc","age","zone","mix","list"]},
   map:{lotZ:(()=>{ try{ const z=+localStorage.getItem("lp-lot-zoom"); return LOT_ZOOMS.includes(z)?z:LOT_DEFAULT; }catch(_){ return LOT_DEFAULT; } })(), blockAgg:{cat:"area",num:"mean",yb:"median",fl:"area",dq:"any"},
        opacity:0.85, fill:true, lotLines:true, labels:true, basemap:"map", ntas:true, tracts:false, dim:true,
@@ -135,6 +135,11 @@ function unpack(u, magic){
 }
 const MLAT=110574, mlng=lat=>111320*Math.cos(lat*Math.PI/180), KX=mlng(40.7);
 const eLat=lat=>{ const f=lat*Math.PI/180; return 111132.92-559.82*Math.cos(2*f)+1.175*Math.cos(4*f); }, eLng=lat=>{ const f=lat*Math.PI/180; return 111412.84*Math.cos(f)-93.5*Math.cos(3*f); };
+function geoPlane(lng0,lat0){
+  const f=(lng,lat)=>{ const mid=(lat+lat0)/2; return [(lng-lng0)*eLng(mid),(lat-lat0)*eLat(mid)]; };
+  const inv=(u,v)=>{ let lat=lat0+v/eLat(lat0); lat=lat0+v/eLat((lat+lat0)/2); lat=lat0+v/eLat((lat+lat0)/2); return [lng0+u/eLng((lat+lat0)/2),lat]; };
+  return {f,inv};
+}
 const GRID=0.0025;
 const BIG_LOT=250;
 function decodeCore(u, rel){
@@ -174,7 +179,7 @@ function csr(key, k, n){ const start=new Uint32Array(k+2), out=new Uint32Array(n
   for (let j=2;j<k+2;j++) start[j]+=start[j-1];
   for (let i=0;i<n;i++){ const v=key[i]; if (v<k) out[start[v+1]++]=i; }
   return [start.subarray(0,k+1),out]; }
-function areaLots(P, kind){ const key=kind+"Lots"; if (!P[key]) P[key]=csr(kind==="nta"?P.nta:P.tract,P.areas.length,P.n); return P[key]; }
+function areaLots(P, kind){ const key=kind+"Lots"; if (!P[key]) P[key]=csr(P[kind],P.areas.length,P.n); return P[key]; }
 
 function buildGrid(P){
   const n=P.n, [ox,oy]=P.origin, u=P.H.boxUnit||1e-5, B=P.box;
@@ -269,9 +274,22 @@ async function loadAddr(P){
   const u=await gunzip(await fetchBytes(P.dir+P.files.addr));
   P.addr=new TextDecoder().decode(u).split("\n"); P.addrLower=P.addr.map(s=>s.toLowerCase());
 }
+const GEO_KINDS={cd:["Districts","Community districts"],cdta:["CDTAs","Community district tabulation areas"],boro:["Boroughs","Boroughs"]};
+const KIND_NAME={nta:"Neighborhood tabulation area",tract:"2020 census tract",cd:"Community district",cdta:"Community district tabulation area",boro:"Borough"};
+async function loadMore(P){
+  let M; try{ M=JSON.parse(new TextDecoder().decode(await gunzip(await fetchBytes(P.dir+"more_areas.json.gz")))); }catch(_){ return; }
+  const n=P.n, idx=(k,c)=>{ const v=P.areaIdx.get(k+":"+c); return v==null?65535:v; };
+  for (const e of M.entries){ P.areaIdx.set(e.kind+":"+e.code,P.areas.length); P.areas.push({...e,polys:M.polys[e.kind][e.code]||[]}); }
+  P.boro=new Uint16Array(n); P.cdta=new Uint16Array(n).fill(65535); P.cd=new Uint16Array(n).fill(65535);
+  const bi=[0,1,2,3,4,5].map(b=>idx("boro",b)), nc=new Map();
+  for (let i=0;i<n;i++){ P.boro[i]=bi[Math.floor(P.bbl[i]/1e9)]||65535; const na=P.nta[i]; if (na===65535||!P.areas[na]) continue;
+    let v=nc.get(na); if (v==null){ v=idx("cdta",M.ntaCdta[P.areas[na].code]); nc.set(na,v); } P.cdta[i]=v; }
+  M.cdRuns.forEach(([s,c],k)=>{ if (c) P.cd.fill(idx("cd",c),s,k+1<M.cdRuns.length?M.cdRuns[k+1][0]:n); });
+  P.moreAreas=true;
+}
 async function loadAreas(P){
   const u=await gunzip(await fetchBytes(P.dir+P.files.areas)), A=JSON.parse(new TextDecoder().decode(u));
-  for (const a of P.areas) a.polys=(A[a.kind]||{})[a.code]||[];
+  for (const a of P.areas) if (A[a.kind]) a.polys=A[a.kind][a.code]||[];
   P.areasLoaded=true;
 }
 
@@ -311,6 +329,7 @@ async function getPack(id){
   if (!st.packs.has(id)){ const rel=st.releases.find(r=>r.id===id);
     const job=(async()=>{
       const P=decodeCore(await gunzip(await fetchBytes(relDir(rel)+"core.lpk")),rel);
+      await loadMore(P);
       if (rel.far) await loadFar(P).catch(err=>{ console.warn("FAR table:",err); P.farError=err.message; });
       if (rel.qa) P.qaReady=loadQA(P).then(()=>{ P.dqKey=""; if (P===st.P){ if (st.colorBy==="dq"){ restyleLots(true); } renderProfile(); } }).catch(err=>console.warn("data issues:",err));
       P.addrReady=new Promise(r=>setTimeout(r,map?0:400)).then(()=>loadAddr(P)).then(()=>onAddr(P)).catch(err=>console.warn("addresses:",err));
@@ -321,7 +340,12 @@ async function getPack(id){
 }
 function onAddr(P){ if (P===st.P) renderProfile(); }
 function onAreas(P){ if (P!==st.P||!map||!map.getSource("ntas")) return;
-  map.getSource("ntas").setData(areasGeoJSON(P,"nta")); map.getSource("tracts").setData(areasGeoJSON(P,"tract")); drawSelection(); }
+  map.getSource("ntas").setData(areasGeoJSON(P,"nta")); map.getSource("tracts").setData(areasGeoJSON(P,"tract")); if (map.getSource("geos")) map.getSource("geos").setData(geosGeoJSON(P)); drawSelection(); }
+function geosGeoJSON(P){
+  return {type:"FeatureCollection", features:P.areas.map((a,i)=>GEO_KINDS[a.kind]&&a.polys&&a.polys.length?{type:"Feature",id:i,properties:{i,name:a.name,k:a.kind},geometry:{type:"MultiPolygon",coordinates:a.polys}}:null).filter(Boolean)};
+}
+function applyGeo(){ if (!map||!map.getLayer("geo-fill")) return; const on=st.mode==="geo", f=["==",["get","k"],st.geoKind];
+  map.setFilter("geo-fill",f); map.setFilter("geo-line",f); vis("geo-fill",on); vis("geo-line",on); }
 function areasGeoJSON(P, kind){
   return {type:"FeatureCollection", features:P.areas.map((a,i)=>a.kind!==kind||!a.polys?null:({type:"Feature",id:i,
     properties:{i,name:a.name}, geometry:{type:"MultiPolygon",coordinates:a.polys}})).filter(Boolean)};
@@ -332,17 +356,17 @@ function areaLabelsGeoJSON(P){
 const bblParts = bbl => { const b=Math.round(bbl); return {boro:Math.floor(b/1e9), block:Math.floor(b/1e4)%1e5, lot:b%1e4}; };
 const blockName = key => `${BORO[Math.floor(key/1e5)]||"Borough "+Math.floor(key/1e5)} block ${key%1e5}`;
 
-const distM=(a,b)=>Math.hypot((a[0]-b[0])*mlng((a[1]+b[1])/2),(a[1]-b[1])*MLAT);
-function circle(c,m,n=96){ const kx=mlng(c[1]),o=[]; for(let i=0;i<=n;i++){const t=i/n*2*Math.PI; o.push([c[0]+Math.cos(t)*m/kx,c[1]+Math.sin(t)*m/MLAT]);} return o; }
+const distM=(a,b)=>{ const y=(a[1]+b[1])/2; return Math.hypot((a[0]-b[0])*eLng(y),(a[1]-b[1])*eLat(y)); };
+function circle(c,m,n=96){ const g=geoPlane(c[0],c[1]),o=[]; for(let i=0;i<=n;i++){const t=i/n*2*Math.PI; o.push(g.inv(Math.cos(t)*m,Math.sin(t)*m));} return o; }
 function inRing(x,y,ring){ let s=false; for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const [xi,yi]=ring[i],[xj,yj]=ring[j];
   if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi) s=!s; } return s; }
 
 function starUnion(pts, m, n=180){
-  const c=[pts.reduce((a,p)=>a+p[0],0)/pts.length, pts.reduce((a,p)=>a+p[1],0)/pts.length], kx=mlng(c[1]);
-  const Q=pts.map(([x,y])=>[(x-c[0])*kx,(y-c[1])*MLAT]), ring=[];
+  const c=[pts.reduce((a,p)=>a+p[0],0)/pts.length, pts.reduce((a,p)=>a+p[1],0)/pts.length], kx=eLng(c[1]), ky=eLat(c[1]);
+  const Q=pts.map(([x,y])=>[(x-c[0])*kx,(y-c[1])*ky]), ring=[];
   for (let k=0;k<=n;k++){ const t=k/n*2*Math.PI, ux=Math.cos(t), uy=Math.sin(t); let best=0;
     for (const [px,py] of Q){ const b=ux*px+uy*py, d=m*m-(px*px+py*py)+b*b; if (d>=0){ const te=b+Math.sqrt(d); if(te>best) best=te; } }
-    ring.push([c[0]+ux*best/kx, c[1]+uy*best/MLAT]); }
+    ring.push([c[0]+ux*best/kx, c[1]+uy*best/ky]); }
   return ring;
 }
 
@@ -357,10 +381,13 @@ const clipOf=sel=>sel.type==="group"?(sel.parts.find(p=>isShape(p))||{}).clip||"
 function shapeAcres(sel){
   const C=[], Pg=[], add=x=>{ if (x.type==="radius") C.push([x.c[0],x.c[1],x.m]); else if (x.type==="walk") walkPts(x.sid).forEach(q=>C.push([q[0],q[1],x.m])); else if (x.type==="poly") Pg.push(x.ring); };
   (sel.type==="group"?sel.parts:[sel]).forEach(add); if (!C.length&&!Pg.length) return null;
-  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity; const ox=(C[0]||Pg[0][0])[0], oy=(C[0]||Pg[0][0])[1], kx=eLng(oy), ky=eLat(oy);
-  const cs=C.map(([x,y,m])=>[(x-ox)*kx,(y-oy)*ky,m]), ps=Pg.map(r=>r.map(([x,y])=>[(x-ox)*kx,(y-oy)*ky]));
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity; const g=geoPlane(...(C[0]||Pg[0][0]).slice(0,2));
+  const cs=C.map(([x,y,m])=>[...g.f(x,y),m]), ps=Pg.map(r=>r.map(([x,y])=>g.f(x,y)));
+  const circ=([cx,cy,m])=>{ const h=geoPlane(cx,cy); return circlePoly(0,0,m).map(([u,v])=>g.f(...h.inv(u,v))); };
   cs.forEach(([x,y,m])=>{ x0=Math.min(x0,x-m); x1=Math.max(x1,x+m); y0=Math.min(y0,y-m); y1=Math.max(y1,y+m); });
   ps.forEach(r=>r.forEach(([x,y])=>{ x0=Math.min(x0,x); x1=Math.max(x1,x); y0=Math.min(y0,y); y1=Math.max(y1,y); }));
+  if (window.polygonClipping) try { const sh=[...C.map(q=>[circ(q)]),...ps.map(r=>[r])];
+    const u=sh.length===1?[sh[0]]:window.polygonClipping.union(...sh); return u.reduce((s,p)=>s+ringArea(p[0])-p.slice(1).reduce((t,h)=>t+ringArea(h),0),0)/4046.856; } catch(err){}
   const N=150, dx=(x1-x0)/N, dy=(y1-y0)/N; let hit=0;
   for (let i=0;i<N;i++) for (let j=0;j<N;j++){ const x=x0+(i+.5)*dx, y=y0+(j+.5)*dy;
     if (cs.some(([cx,cy,m])=>(x-cx)**2+(y-cy)**2<=m*m)||ps.some(r=>inRing(x,y,r))) hit++; }
@@ -393,16 +420,30 @@ function shareInside(polys, box, test){
 const boxOf=(P,i)=>P.lotBox.subarray(4*i,4*i+4);
 
 const PARK_LU=8;
-const PARK_NAME={whole:"Whole park",part:"Part inside",edge:"Leave out edge parks",out:"Leave out all parks"};
+const PARK_NAME={part:"Part inside",whole:"Whole park",edge:"Leave out edge parks",out:"Leave out all parks"};
 const PARK_DESC={whole:"Parks count in full, even if only a corner is inside.",part:"Parks count only the share of their area inside the shape.",
   edge:"Parks that cross the boundary are left out; parks fully inside count.",out:"Every park lot is left out."};
 const parkCache=new Map();
 function shapeParts(sel,sh,rest){ if (sel.type==="group"||sel.type==="multi") sel.parts.forEach(p=>shapeParts(p,sh,rest)); else (isShape(sel)?sh:rest).push(sel); }
+function shapeM(P, sh){
+  const PC=window.polygonClipping; if (!PC) return null; const [ox,oy]=P.origin, M=([lng,lat])=>[(lng-ox)*KX,(lat-oy)*MLAT], polys=[];
+  for (const p of sh){
+    if (p.type==="radius"||p.type==="walk"){ const pts=p.type==="radius"?[p.c]:walkPts(p.sid), K=256, mr=p.m*Math.sqrt((2*Math.PI/K)/Math.sin(2*Math.PI/K));
+      for (const c of pts){ const g=geoPlane(c[0],c[1]), ring=[]; for (let k=0;k<K;k++){ const t=k/K*2*Math.PI; ring.push(M(g.inv(Math.cos(t)*mr,Math.sin(t)*mr))); } ring.push(ring[0]); polys.push([ring]); } }
+    else for (const r of selRings(P,p)) polys.push([r.map(M)]); }
+  if (!polys.length) return null;
+  try { return polys.length===1?[polys[0]]:PC.union(...polys); } catch(err){ console.warn("shape union:",err); return null; }
+}
+function exactShare(polys, shape){
+  try { const A=lotAreaM(polys); if (!A) return null;
+    const hit=window.polygonClipping.intersection(polys.map(p=>p.map(r=>r.map(([x,y])=>[x,y]))),shape).reduce((s,p)=>s+ringArea(p[0])-p.slice(1).reduce((t,h)=>t+ringArea(h),0),0);
+    return Math.min(1,Math.max(0,hit/A)); } catch(err){ return null; }
+}
 function parkFrac(P, sel, idx){
   const sh=[], rest=[]; shapeParts(sel,sh,rest); if (!sh.length) return null;
   if (st.opts.park==="out") return new Map();
   const key=P.id+"|"+(st.T?st.T.file:"")+"|"+encSel(sel)+"|"+idx.length; let r=parkCache.get(key); if (r) return r;
-  r=new Map(); const tests=sh.map(p=>partTest(P,p)), whole=new Set(), miss=[], [ox,oy]=P.origin;
+  r=new Map(); const tests=sh.map(p=>partTest(P,p)), whole=new Set(), miss=[], [ox,oy]=P.origin; let shape;
   rest.forEach(p=>selIndices(P,p).forEach(i=>whole.add(i)));
   const inside=(x,y)=>{ const lng=x/KX+ox, lat=y/MLAT+oy; return tests.some(t=>t(lng,lat)); };
   for (const i of idx){ if (P.lu[i]!==PARK_LU||whole.has(i)) continue;
@@ -410,6 +451,8 @@ function parkFrac(P, sel, idx){
     let all=true, x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
     for (const poly of polys) for (const [vx,vy] of poly[0]){ if (all&&!inside(vx,vy)) all=false; if(vx<x0)x0=vx; if(vx>x1)x1=vx; if(vy<y0)y0=vy; if(vy>y1)y1=vy; }
     if (all) continue;
+    if (shape===undefined) shape=shapeM(P,sh);
+    const ex=shape?exactShare(polys,shape):null; if (ex!=null){ if (ex<0.99999) r.set(i,ex); continue; }
     const N=32; let lot=0, hit=0;
     for (let a=0;a<N;a++) for (let b=0;b<N;b++){ const x=x0+(x1-x0)*(a+.5)/N, y=y0+(y1-y0)*(b+.5)/N; if (!inLotM(polys,x,y)) continue; lot++; if (inside(x,y)) hit++; }
     if (lot&&hit<lot) r.set(i,hit/lot); }
@@ -419,42 +462,53 @@ function parkFrac(P, sel, idx){
 }
 const statOpts=(P,sel,idx)=>st.opts.park==="whole"?st.opts:{...st.opts,parkF:parkFrac(P,sel,idx)};
 
+function circlePoly(cx,cy,m,K=360){ const mr=m*Math.sqrt((2*Math.PI/K)/Math.sin(2*Math.PI/K)), o=[]; for (let k=0;k<=K;k++){ const t=k/K*2*Math.PI; o.push([cx+Math.cos(t)*mr,cy+Math.sin(t)*mr]); } return o; }
+function exactIn(polys, shape){ const PC=window.polygonClipping; if (!PC) return null;
+  try { const A=lotAreaM(polys); if (!A) return null; return PC.intersection(polys,shape).reduce((s,p)=>s+ringArea(p[0])-p.slice(1).reduce((t,h)=>t+ringArea(h),0),0)/A; } catch(err){ return null; } }
 function lotsInCircles(P, pts, m, mode, miss){
-  const out=[], C=pts.map(([x,y])=>toM(P,x,y)), r2=m*m;
+  const lat0=pts[0][1], G=geoPlane(pts[0][0],lat0), Gs=pts.map(([x,y])=>geoPlane(x,y)), [ox,oy]=P.origin, LL=([x,y])=>[x/KX+ox,y/MLAT+oy], T=v=>G.f(...LL(v));
+  const ss=1.001*Math.max(eLng(lat0-0.05)/KX,eLat(lat0+0.05)/MLAT), E=0.5, S=polys=>polys.map(p=>p.map(r=>r.map(T)));
+  const out=[], C=pts.map(([x,y])=>G.f(x,y)), r2=m*m, inK=(k,lng,lat)=>{ const [u,v]=Gs[k].f(lng,lat); return u*u+v*v<=r2; };
+  const inAnyLL=(lng,lat)=>{ for (let k=0;k<Gs.length;k++) if (inK(k,lng,lat)) return true; return false; };
+  const ownPlane=(raw,k)=>raw.map(p=>p.map(r=>r.map(v=>Gs[k].f(...LL(v)))));
+  const circG=(k,K=360)=>circlePoly(0,0,m,K).map(([u,v])=>G.f(...Gs[k].inv(u,v)));
+  const clipIn=(polys,circ)=>polys.reduce((s,poly)=>s+clipConvex(poly[0],circ)-poly.slice(1).reduce((t,h)=>t+clipConvex(h,circ),0),0);
   let a=180,b=90,c=-180,d=-90; for (const [x,y] of pts){ if(x<a)a=x; if(x>c)c=x; if(y<b)b=y; if(y>d)d=y; }
-  const cand=lotsNear(P,a-m/KX,b-m/MLAT,c+m/KX,d+m/MLAT);
-  const inAny=(x,y)=>{ for (const [cx,cy] of C) if ((x-cx)**2+(y-cy)**2<=r2) return true; return false; };
-  if (mode==="center"){ const kx=mlng(pts[0][1]);
-    for (const i of cand){ const x=P.lng[i], y=P.lat[i]; for (const [cx,cy] of pts){ const dx=(x-cx)*kx, dy=(y-cy)*MLAT; if (dx*dx+dy*dy<=r2){ out.push(i); break; } } }
+  const cand=lotsNear(P,a-(m+1)/eLng(lat0+0.05),b-(m+1)/eLat(lat0),c+(m+1)/eLng(lat0+0.05),d+(m+1)/eLat(lat0));
+  if (mode==="center"){
+    for (const i of cand) if (inAnyLL(...LL([P.X[i],P.Y[i]]))) out.push(i);
     return Uint32Array.from(out).sort(); }
   for (const i of cand){
-    const x=P.X[i], y=P.Y[i];
-    const rad=P.lotRad[i]; let full=false; const near=[];
-    for (const q of C){ const dd=Math.hypot(x-q[0],y-q[1]); if (dd+rad<=m){ full=true; break; } if (dd-rad<=m) near.push(q); }
+    const [x,y]=T([P.X[i],P.Y[i]]);
+    const rad=P.lotRad[i]*ss+0.05; let full=false; const near=[];
+    for (let k=0;k<C.length;k++){ const q=C[k], dd=Math.hypot(x-q[0],y-q[1]); if (dd+rad<=m-E){ full=true; break; } if (dd-rad<=m+E) near.push(k); }
     if (full){ out.push(i); continue; }
     if (!near.length) continue;
-    const [bx0,by0,bx1,by1]=boxOf(P,i);
-    if (near.some(([cx,cy])=>(Math.max(cx-bx0,bx1-cx))**2+(Math.max(cy-by0,by1-cy))**2<=r2)){ out.push(i); continue; }
-    if (!near.some(([cx,cy])=>{ const dx=Math.max(bx0-cx,0,cx-bx1), dy=Math.max(by0-cy,0,cy-by1); return dx*dx+dy*dy<=r2; })) continue;
-    const cin=inAny(x,y);
+    const B0=boxOf(P,i), bq=[T([B0[0],B0[1]]),T([B0[2],B0[1]]),T([B0[0],B0[3]]),T([B0[2],B0[3]])], bx0=Math.min(...bq.map(p=>p[0]))-0.05, by0=Math.min(...bq.map(p=>p[1]))-0.05, bx1=Math.max(...bq.map(p=>p[0]))+0.05, by1=Math.max(...bq.map(p=>p[1]))+0.05;
+    if (near.some(k=>{ const [cx,cy]=C[k]; return (Math.max(cx-bx0,bx1-cx))**2+(Math.max(cy-by0,by1-cy))**2<=(m-E)**2; })){ out.push(i); continue; }
+    if (!near.some(k=>{ const [cx,cy]=C[k], dx=Math.max(bx0-cx,0,cx-bx1), dy=Math.max(by0-cy,0,cy-by1); return dx*dx+dy*dy<=(m+E)**2; })) continue;
+    const cin=inAnyLL(...LL([P.X[i],P.Y[i]]));
     if (mode==="all" && C.length===1 && !cin) continue;
-    const polys=lotRingsM(P,i);
-    if (!polys){ if (miss) miss.push(i); if (cin) out.push(i); continue; }
-    if (!polys.length) continue;
+    const raw=lotRingsM(P,i);
+    if (!raw){ if (miss) miss.push(i); if (cin) out.push(i); continue; }
+    if (!raw.length) continue; const polys=S(raw);
 
     let reach=0, ex0=Infinity, ey0=Infinity, ex1=-Infinity, ey1=-Infinity;
-    for (const poly of polys) for (const [vx,vy] of poly[0]){ const d=Math.hypot(vx-x,vy-y); if (d>reach) reach=d; if(vx<ex0)ex0=vx; if(vx>ex1)ex1=vx; if(vy<ey0)ey0=vy; if(vy>ey1)ey1=vy; }
+    for (const poly of polys) for (const [vx,vy] of poly[0]){ const dv=Math.hypot(vx-x,vy-y); if (dv>reach) reach=dv; if(vx<ex0)ex0=vx; if(vx>ex1)ex1=vx; if(vy<ey0)ey0=vy; if(vy>ey1)ey1=vy; }
     near.length=0; let whole=false;
-    for (const q of C){ const dd=Math.hypot(x-q[0],y-q[1]); if (dd+reach<=m){ whole=true; break; } if (dd-reach<=m) near.push(q); }
+    for (let k=0;k<C.length;k++){ const q=C[k], dd=Math.hypot(x-q[0],y-q[1]); if (dd+reach<=m-E){ whole=true; break; } if (dd-reach<=m+E) near.push(k); }
     if (whole){ out.push(i); continue; }
     if (!near.length) continue;
     let ok=false;
-    if (mode==="touch") ok=near.some(([cx,cy])=>inLotM(polys,cx,cy)||edgeDist(polys,cx,cy)<=m);
-    else if (mode==="all") ok=polys.every(poly=>poly[0].every(([vx,vy])=>inAny(vx,vy)));
+    if (mode==="touch") ok=near.some(k=>{ const pq=ownPlane(raw,k); return inLotM(pq,0,0)||edgeDist(pq,0,0)<=m; });
+    else if (mode==="all") ok=raw.every(poly=>poly[0].every(v=>inAnyLL(...LL(v))));
     else { const A=lotAreaM(polys); if (!A) continue;
-      if (near.length===1){ const [cx,cy]=near[0], circ=[], mr=m*Math.sqrt((2*Math.PI/96)/Math.sin(2*Math.PI/96)); for (let k=0;k<=96;k++){ const t=k/96*2*Math.PI; circ.push([cx+Math.cos(t)*mr,cy+Math.sin(t)*mr]); }
-        const inA=polys.reduce((s,poly)=>s+clipConvex(poly[0],circ)-poly.slice(1).reduce((t,h)=>t+clipConvex(h,circ),0),0); ok=inA/A>=0.5; }
-      else ok=shareInside(polys,[ex0,ey0,ex1,ey1],inAny)>=0.5; }
+      const one=(k,K)=>{ const pq=ownPlane(raw,k); return clipIn(pq,circlePoly(0,0,m,K))/lotAreaM(pq); };
+      const each=near.map(k=>{ const v=one(k,360); return Math.abs(v-0.5)<0.002?one(k,4096):v; });
+      const lo=Math.max(...each), hi=each.reduce((s,v)=>s+v,0);
+      if (lo>=0.5||near.length===1) ok=lo>=0.5; else if (hi<0.5) ok=false;
+      else { let sh=null; try { const un=K=>exactIn(polys,window.polygonClipping.union(...near.map(k=>[circG(k,K)]))); sh=un(360); if (sh!=null&&Math.abs(sh-0.5)<0.002) sh=un(4096); } catch(err){ sh=null; }
+        ok=(sh!=null?sh:shareInside(polys,[ex0,ey0,ex1,ey1],(px,py)=>inAnyLL(...G.inv(px,py))))>=0.5; } }
     if (ok) out.push(i); }
   return Uint32Array.from(out).sort();
 }
@@ -490,7 +544,8 @@ function lotsInRing(P, ring, mode, miss){
     if (mode==="all") ok=vin===vtot&&!ringIn;
     else if (mode==="touch"){ ok=vin>0||ringIn;
       if (!ok) outer: for (const poly of polys){ const r=poly[0]; for (let k=1;k<r.length;k++) for (let j=1;j<R.length;j++) if (segCross(r[k-1],r[k],R[j-1],R[j])){ ok=true; break outer; } } }
-    else ok = vin===vtot&&!ringIn ? true : vin===0&&!ringIn ? false : shareInside(polys,eb,(px,py)=>inRing(px,py,R))>=0.5;
+    else if (vin===vtot&&!ringIn) ok=true; else if (vin===0&&!ringIn) ok=false;
+    else { const sh=exactIn(polys,[R]); ok=(sh!=null?sh:shareInside(polys,eb,(px,py)=>inRing(px,py,R)))>=0.5; }
     if (ok) out.push(i); }
   return Uint32Array.from(out).sort();
 }
@@ -545,8 +600,8 @@ function rawIndices(P, sel, miss){
 }
 
 function partTest(P, sel){
-  if (sel.type==="radius"||sel.type==="walk"){ const pts=sel.type==="radius"?[sel.c]:walkPts(sel.sid), kx=mlng(40.7), r2=sel.m*sel.m;
-    return (x,y)=>pts.some(([cx,cy])=>((x-cx)*kx)**2+((y-cy)*MLAT)**2<r2*0.9999); }
+  if (sel.type==="radius"||sel.type==="walk"){ const pts=sel.type==="radius"?[sel.c]:walkPts(sel.sid); if (!pts.length) return ()=>false; const r2=sel.m*sel.m, G=pts.map(([cx,cy])=>geoPlane(cx,cy).f);
+    return (x,y)=>G.some(f=>{ const [u,v]=f(x,y); return u*u+v*v<r2*0.9999; }); }
   const rings=selRings(P,sel), boxes=rings.map(r=>{ let a=180,b=90,c=-180,d=-90; for (const [x,y] of r){ if(x<a)a=x; if(x>c)c=x; if(y<b)b=y; if(y>d)d=y; } return [a,b,c,d]; });
   return (x,y)=>rings.some((r,i)=>{ const q=boxes[i]; return x>q[0]&&x<q[2]&&y>q[1]&&y<q[3]&&inRing(x,y,r); });
 }
@@ -578,7 +633,7 @@ function selRings(P, sel){
 function lotLL(P,i){ const u=P.H.boxUnit||1e-5, B=P.box, o=4*i; return [P.lng[i]-B[o]*u,P.lat[i]-B[o+1]*u,P.lng[i]+B[o+2]*u,P.lat[i]+B[o+3]*u]; }
 function selBox(P, sel){
   const grow=(a,b)=>!a?b:!b?a:[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])];
-  const ofPts=(pts,m=0)=>pts.reduce((bx,[x,y])=>grow(bx,[x-m/mlng(y),y-m/MLAT,x+m/mlng(y),y+m/MLAT]),null);
+  const ofPts=(pts,m=0)=>pts.reduce((bx,[x,y])=>grow(bx,[x-m/eLng(y),y-m/eLat(y),x+m/eLng(y),y+m/eLat(y)]),null);
   if (sel.type==="multi"||sel.type==="group") return sel.parts.reduce((bx,s)=>grow(bx,selBox(P,s)),null);
   if (sel.type==="radius") return ofPts([sel.c],sel.m);
   if (sel.type==="walk") return ofPts(walkPts(sel.sid),sel.m);
@@ -606,7 +661,7 @@ function selTitle(P, sel, count){
   if (sel.type==="multi"){ const tot=sel.parts.reduce((a,s)=>a+selIndices(P,s).length,0);
     return [`${sel.parts.length} selections combined`, `${fmt(count)} lots in total`+(tot>count?`; ${fmt(tot-count)} fall in more than one selection and count once`:"")]; }
   if (sel.type==="area"){ const a=P.areas[P.areaIdx.get(sel.kind+":"+sel.code)];
-    return [a?a.name:sel.code,(sel.kind==="nta"?"Neighborhood tabulation area":"2020 census tract")+`, ${fmt(count)} lots`]; }
+    return [a?a.name:sel.code,(KIND_NAME[sel.kind]||"Area")+`, ${fmt(count)} lots`]; }
   if (sel.type==="lots"){ if (sel.bbls.length===1){ const i=P.bblIdx.get(sel.bbls[0]), p=bblParts(sel.bbls[0]);
       return [i!=null&&addrOf(P,i)?addrOf(P,i):`BBL ${sel.bbls[0]}`, i!=null?`${P.dict.lu[P.lu[i]]}${P.dict.zone[P.zone[i]]?`\nZoning district ${P.dict.zone[P.zone[i]]}`:""}`:`${BORO[p.boro]}, block ${p.block}, lot ${p.lot}`]; }
     return [`${fmt(count)} selected lots`, `${MOD}-click lots to add or remove them`]; }
@@ -827,13 +882,62 @@ function needFF(){ if (st.ff||st.ffErr) return; st.ff=fetchBytes(FF_FILE).then(g
   .catch(e=>{ st.ffErr=String(e&&e.message||e); st.ff=null; renderProfile(); }); }
 const ffPct=v=>v==null?"—":fmt(v*100,1)+"%";
 const ffVal=(v,k)=>v==null?"—":k==="$"?"$"+fmt(v):ffPct(v);
+const FF_AGE=[0,5,10,15,18,20,21,22,25,30,35,40,45,50,55,60,62,65,67,70,75,80,85], FF_INC=[0,1e4,15e3,2e4,25e3,3e4,35e3,4e4,45e3,5e4,6e4,75e3,1e5,125e3,15e4,2e5], FF_RENT=[0,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,900,1e3,1250,1500,2e3,2500,3e3,3500];
+const FF_PAIRS=[null,["pbwpv","poppvu1"],["rochu1","ochu2"],null,["grpi30pl","ochuprnt2"],["grpi50pl","ochuprnt2"],["fb1","pop_4"],["ea_bchdh","ea_p25pl"],["cvlfuem2","cvlf2"],["novhclav","ochu4"],["cw_pbtrns","wrkr16pl"]];
+const FF_GEO={nta:["ntas","neighborhood"],tract:["tracts","tract"],cd:["districts","community district"],cdta:["cdtas","CDTA"],boro:["boroughs","borough"]};
+function ffAreas(sel){
+  const out=[], walk=s=>!s?false:s.type==="area"?!!FF_GEO[s.kind]&&(out.push(s),true):(s.type==="group"||s.type==="multi")&&!(s.minus&&s.minus.length)&&s.parts.every(walk);
+  if (!walk(sel)) return null; const P=st.P, seen=new Set(), chosen=k=>new Set(out.filter(s=>s.kind===k).map(s=>P.areaIdx.get(k+":"+s.code)));
+  const C={nta:chosen("nta"),cdta:chosen("cdta"),boro:chosen("boro")}, over={tract:["nta","cdta","boro"],nta:["cdta","boro"],cdta:["boro"],cd:["boro"],boro:[]};
+  const list=out.filter(s=>{ const k=s.kind+":"+s.code; if (seen.has(k)) return false; seen.add(k); const ai=P.areaIdx.get(k); if (ai==null||!P[s.kind]) return true;
+    const [start,lots]=areaLots(P,s.kind); if (start[ai]===start[ai+1]) return true; const i=lots[start[ai]];
+    return !over[s.kind].some(o=>C[o].size&&P[o]&&C[o].has(P[o][i])); });
+  if (list.some(s=>s.kind==="cd")&&list.some(s=>s.kind!=="cd"&&s.kind!=="boro")) list.clash=true;
+  return list;
+}
+function ffMedian(c,edges,adj=0){
+  const tot=c.reduce((a,b)=>a+b,0); if (!tot) return [null,false]; let run=0;
+  for (let k=0;k<c.length;k++){ if (run+c[k]>=tot/2){ if (k===c.length-1) return [edges[k],true]; return [edges[k]+(tot/2-run)/c[k]*(edges[k+1]-edges[k]-adj),false]; } run+=c[k]; }
+  return [null,false];
+}
+function ffMedianMoe(c,edges,df){
+  const tot=c.reduce((a,b)=>a+b,0); if (!tot) return null; const cum=k=>c.slice(0,k).reduce((a,b)=>a+b,0)/tot*100, se=df*Math.sqrt(93/(7*tot)*2500);
+  const at=p=>{ const k=edges.findIndex((_,j)=>Math.round(p)>cum(j)&&Math.round(p)<cum(j+1)); if (k<0) return null;
+    const A1=edges[k], A2=edges[k+1]!=null?edges[k+1]:edges[k], C1=cum(k), C2=cum(k+1); return (p-C1)/(C2-C1)*(A2-A1)+A1; };
+  const hi=at(50+se), lo=at(50-se); return hi==null||lo==null?null:0.5*(hi-lo)*1.645;
+}
+function ffCombine(F,keys,omit=new Set()){
+  const E=keys.map(k=>F.a[k]).filter(Boolean), dE=E.filter(e=>e.d&&e.d.c), out={parts:E.length};
+  if (dE.length){ const c=dE[0].d.c.map((_,j)=>dE.reduce((a,e)=>a+(e.d.c[j]||0),0)), pop=c[0];
+    const prev=dE.every(e=>e.d.c[5]!=null)?c[5]:null, sh=v=>pop?v/pop:null;
+    out.d={b:[pop,ffMedian(c.slice(48,71),FF_AGE)[0],c[1],c[1]?c[4]/c[1]:null,c[2],c[3],prev],pyr:[c.slice(6,24).map(sh),c.slice(24,42).map(sh)],race:c.slice(42,48).map(sh)}; }
+  const popOf=e=>e.d&&e.d.c?e.d.c[0]:0, keep=keys.filter(k=>F.a[k]&&!omit.has(k)), aE=keep.map(k=>F.a[k]).filter(e=>e.ac);
+  out.acsMiss=keep.filter(k=>!F.a[k].ac&&popOf(F.a[k])>0); out.omitted=keys.filter(k=>F.a[k]&&omit.has(k));
+  if (aE.length&&!out.acsMiss.length){ const V={};
+    F.meta.ac.forEach((n,j)=>{ let s=0,q=0,z=0; for (const e of aE){ const v=e.ac[2*j], m=e.ac[2*j+1]; s+=v; if (v) q+=m*m; else z=Math.max(z,m); } V[n]=[s,Math.sqrt(q+z*z)]; });
+    const med=(names,edges,df)=>{ const c=names.map(n=>V[n][0]), [v,top]=ffMedian(c,edges,1), m=v==null?null:ffMedianMoe(c,edges,df);
+      return [v==null?null:Math.round(v),m==null?null:Math.round(m),v&&m!=null&&m/1.645/v>=0.2?0:1,top]; };
+    out.a=FF_PAIRS.map((pr,i)=>{ if (!pr){ const a=F.meta.ac.indexOf(i===0?"mdhhiu10":"ru100"), ed=i===0?FF_INC:FF_RENT; return med(F.meta.ac.slice(a,a+ed.length),ed,i===0?1.5:1.6); }
+      const [n,mn]=V[pr[0]], [d,md]=V[pr[1]]; if (!d) return [null,null,0]; const p=n/d, r=mn*mn-p*p*md*md;
+      return [p,Math.sqrt(r>=0?r:mn*mn+p*p*md*md)/d,n>0&&mn/1.645/n<0.2?1:0]; }); }
+  return out;
+}
 function ffSpecs(specs){
-  const sel=st.sel; if (!sel||sel.type!=="area"||(sel.kind!=="nta"&&sel.kind!=="tract")) return;
-  const name=sel.kind==="nta"?"neighborhood":"tract", link=`<p class="ffsrc">Source: NYC DCP Population FactFinder. <a href="https://popfactfinder.planning.nyc.gov/explorer/${sel.kind==="nta"?"ntas":"tracts"}/${encodeURIComponent(sel.code)}" target="_blank" rel="noopener">Open in FactFinder ↗</a></p>`;
+  const list=ffAreas(st.sel); if (!list||!list.length) return;
+  const one=list.length===1?list[0]:null, plural=(n,w)=>`${fmt(n)} ${w}${n===1?"":"s"}`, name=one?FF_GEO[one.kind][1]:"selection";
+  const parts=Object.keys(FF_GEO).map(k=>[k,list.filter(s=>s.kind===k).length]).filter(([,n])=>n), mixed=parts.length>1;
+  if (list.clash){ const t="Community districts don't line up exactly with neighborhoods, tracts or CDTAs, so FactFinder figures can't be added up for this mix.";
+    specs.pop={title:"People (2020 Census)",placeholder:t}; specs.acs={title:"Households and income (ACS)",placeholder:t}; return; }
+  const link=one?`<p class="ffsrc">Source: NYC DCP Population FactFinder. <a href="https://popfactfinder.planning.nyc.gov/explorer/${FF_GEO[one.kind][0]}/${encodeURIComponent(one.code)}" target="_blank" rel="noopener">Open in FactFinder ↗</a></p>`
+    :`<p class="ffsrc">Source: NYC DCP Population FactFinder, added up across ${parts.map(([k,n])=>plural(n,FF_GEO[k][1])).join(" and ")}${mixed?" (an area inside another chosen area counts once)":""}.</p>`;
+  const linkA=one||!st.ffOmit||!list.some(s=>st.ffOmit.has(s.kind+":"+s.code))?link:(()=>{ const L=list.filter(s=>!st.ffOmit.has(s.kind+":"+s.code)), pa=Object.keys(FF_GEO).map(k=>[k,L.filter(s=>s.kind===k).length]).filter(([,n])=>n);
+    return `<p class="ffsrc">Source: NYC DCP Population FactFinder, added up across ${pa.map(([k,n])=>plural(n,FF_GEO[k][1])).join(" and ")}${pa.length>1?" (an area inside another chosen area counts once)":""}.</p>`; })();
   if (!st.ff||st.ff instanceof Promise){ needFF(); const ph=st.ffErr?"Population data couldn't be loaded.":"Loading population data…";
     specs.pop={title:"People (2020 Census)",placeholder:ph}; specs.acs={title:"Households and income (ACS)",placeholder:ph}; return; }
-  const F=st.ff, e=F.a[sel.kind+":"+sel.code], N=F.nyc;
-  if (!e){ specs.pop={title:"People (2020 Census)",placeholder:`FactFinder has no data for this ${name}.`}; return; }
+  const F=st.ff, N=F.nyc, keys=list.map(s=>s.kind+":"+s.code), omit=st.ffOmit||(st.ffOmit=new Set()), e=one?F.a[keys[0]]:ffCombine(F,keys,omit);
+  const aName=k=>{ const a=st.P.areas[st.P.areaIdx.get(k)], kind=k.split(":")[0]; return (a?a.name:k.slice(kind.length+1))+(kind==="tract"||kind==="nta"||kind==="cdta"?"":` (${FF_GEO[kind][1]})`); };
+  const left=!one&&e.omitted&&e.omitted.length?`<p class="ffsrc ffomit">Left out of this section (no survey estimates): ${e.omitted.map(k=>`${esc(aName(k))} <button class="link" data-ffback="${esc(k)}">Add back</button>`).join(", ")}.</p>`:"";
+  if (!e||e.parts===0){ specs.pop={title:"People (2020 Census)",placeholder:`FactFinder has no data for this ${name}.`}; return; }
   if (e.d&&e.d.b[0]){ const [pop,age,hh,hsz,hu,vac,pop10]=e.d.b, [npop,nage,,nhsz,,,npop10]=N.d.b;
     const tile=(k,v,sub)=>`<div class="ftile"><small>${k}</small><b>${v}</b>${sub?`<span>${sub}</span>`:""}</div>`, ch=(a,b)=>a&&b?`${a>=b?"+":""}${fmt((a/b-1)*100,1)}% since 2010`:"";
     const top=`<div class="ftiles">${tile("Population",fmt(pop),ch(pop,pop10))}${tile("Median age",fmt(age,1),`NYC ${fmt(nage,1)}`)}${tile("Households",fmt(hh),`${fmt(hsz,2)} people each · NYC ${fmt(nhsz,2)}`)}</div>`;
@@ -846,10 +950,12 @@ function ffSpecs(specs){
   else specs.pop={title:"People (2020 Census)",placeholder:`The 2020 Census has no population for this ${name}.`};
   if (e.a){ const cols="grid-template-columns:minmax(0,1fr) 92px 64px"; let weak=false;
     const rows=FF_ACS.map(([t,k],i)=>{ const [v,m,ok]=e.a[i]; if (v!=null&&!ok) weak=true;
-      return `<div class="r" style="${cols}"><span class="nm">${t}</span><span class="val${v!=null&&!ok?" weak":""}" title="${m!=null?`Margin of error ± ${k==="$"?"$"+fmt(m):fmt(m*100,1)+" points"}`:""}">${ffVal(v,k)}${v!=null&&!ok?"*":""}</span><span class="val nyc">${ffVal(N.a[i],k)}</span></div>`; }).join("");
+      return `<div class="r" style="${cols}"><span class="nm">${t}</span><span class="val${v!=null&&!ok?" weak":""}" title="${m!=null?`Margin of error ± ${k==="$"?"$"+fmt(m):fmt(m*100,1)+" points"}`:""}">${ffVal(v,k)}${e.a[i][3]?"+":""}${v!=null&&!ok?"*":""}</span><span class="val nyc">${ffVal(N.a[i],k)}</span></div>`; }).join("");
     specs.acs={title:`Households and income (ACS ${F.meta.acs.slice(0,9)})`,html:`<div class="rows ffacs"><div class="r hd" style="${cols}"><span class="nm">Estimate</span><span class="val">Here</span><span class="val">NYC</span></div>${rows}</div>`+
-      `<p class="ffsrc">${weak?"* Not reliable: the margin of error is large compared with the estimate. ":""}Hover a number for its margin of error. ${F.meta.acs}.</p>`+link}; }
-  else specs.acs={title:"Households and income (ACS)",placeholder:`FactFinder doesn't publish survey estimates for this ${name}.`};
+      `<p class="ffsrc">${weak?"* Not reliable: the margin of error is large compared with the estimate. ":""}Hover a number for its margin of error.${one?"":" Medians are worked out from income and rent brackets, as FactFinder does."} ${F.meta.acs}.</p>`+left+linkA}; }
+  else if (!one&&e.acsMiss&&e.acsMiss.length&&!list.every(s=>s.kind==="cd")){ const n=e.acsMiss.length;
+    specs.acs={title:"Households and income (ACS)",html:`<div class="notyet ffmiss"><p>FactFinder doesn't publish survey estimates for ${plural(n,"area")} in this selection, so the survey figures can't be added up until ${n===1?"it is":"they are"} left out:</p><ul>${e.acsMiss.map(k=>`<li><span>${esc(aName(k))}</span><span class="ffact"><button class="link" data-ffomit="${esc(k)}">Leave out of this section</button><button class="link" data-ffdrop="${esc(k)}">Remove from selection</button></span></li>`).join("")}</ul>${n>1?`<button class="link" data-ffomit="${esc(e.acsMiss.join("|"))}">Leave all ${n} out of this section</button>`:""}</div>`+left}; }
+  else specs.acs={title:"Households and income (ACS)",placeholder:list.some(s=>s.kind==="cd")?"FactFinder publishes survey estimates for community district tabulation areas (CDTAs), not community districts. Pick CDTAs under More areas to see them.":!one&&e.omitted&&e.omitted.length?"Every area with survey estimates has been left out of this section.":`FactFinder doesn't publish survey estimates for this ${name}.`,html:left||undefined};
 }
 function sectionSpecs(S){
   const P=st.P, acres=v=>fmt(v/43560,1)+" acres", specs={};
@@ -1088,7 +1194,7 @@ function lotSpecs(i){
       L(`https://communityprofiles.planning.nyc.gov/${(BORO[Math.floor(cdn/100)]||"").toLowerCase().replace(/ /g,"-")}/${cdn%100}`,`Community District ${cdn%100} profile`)]:[]),
       ...(cou?[L(`https://council.nyc.gov/district-${cou}/`,`Council District ${cou}`)]:[])]]].filter(([,ls])=>ls.length);
   const bblX=Math.round(P.bbl[i]), inSel=st.sels.some(e=>exclOf(e.sel).has(bblX)||selIdx0(P,e.sel).includes(i)), isX=st.sels.some(e=>exclOf(e.sel).has(bblX));
-  const canAdd=st.peek!=null&&st.sels.length&&!inSel, web=[[`https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}`,"ZoLa"],[`https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${boro}&block=${b5}&lot=${l4}`,"DOB BIS"],[`https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${boro}&block=${block}&lot=${lot}`,"ACRIS"],[`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,"Google Maps"],[`https://roadview.planninglabs.nyc/view/${lng}/${lat}`,"Street view"]].map(([h,t])=>`<a href="${h}" target="_blank" rel="noopener">${t}</a>`);
+  const canAdd=st.peek!=null&&st.sels.length&&!inSel, web=[[`https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}`,"ZoLa"],[`https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${boro}&block=${b5}&lot=${l4}`,"DOB BIS"],[`https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${boro}&block=${block}&lot=${lot}`,"ACRIS"],[`https://propertyinformationportal.nyc.gov/parcels/${condo?"condo":"parcel"}/${bbl}`,"Property Portal"],[`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,"Google Maps"],[`https://roadview.planninglabs.nyc/view/${lng}/${lat}`,"Street view"]].map(([h,t])=>`<a href="${h}" target="_blank" rel="noopener">${t}</a>`);
   const links=`<div class="lotlinks">${canAdd?`<button data-addpeek>Add to selection</button>`:""}${st.peek!=null?`<button data-selpeek>${st.sels.length?"Select only this lot":"Select this lot"}</button>`:""}${st.peek!=null&&inSel?`<button data-exlot="${bblX}">${isX?"Count in selection":"Leave out of selection"}</button>`:""}<button data-goblock="${boro*1e5+block}">Select block ${block}</button></div><div class="lotweb"><span>Open in</span>${web.join("")}</div>`;
   specs.links={title:"Links", html:!R?`<p class="soft">${wait}</p>`:groups.map(([t,ls])=>`<div class="lgrp"><span>${t}</span><p>${ls.join("")}</p></div>`).join("")};
   return {specs, links, R};
@@ -1182,7 +1288,7 @@ function renderClipRow(){
   row.hidden=false; row.innerHTML=`<label title="How lots on the boundary are treated">Lot inclusion ${clipSelect(vals[0],vals.length>1)}</label>`+
     (ks.length>1&&ks.length<st.sels.length?` <span class="soft">applies to ${ks.length} of ${st.sels.length} selections</span>`:"")+
     `<span class="parkrow"><label title="${esc(PARK_DESC[st.opts.park])}">Park rules <select data-park>${Object.entries(PARK_NAME).map(([k,t])=>`<option value="${k}" title="${esc(PARK_DESC[k])}"${k===st.opts.park?" selected":""}>${t}</option>`).join("")}</select></label><button class="infob" data-parkinfo aria-expanded="${!!st.parkInfo}" aria-label="About park rules" title="About park rules">i</button></span>`+
-    (st.parkInfo?`<span class="parknote">Parks and other open-space lots can be huge. Under <b>Intersecting</b>, a park that only touches the circle or shape counts in full, so a ½ mi radius can pick up hundreds of acres of park that lie mostly outside it. Park rules change only <b>Open Space &amp; Outdoor Recreation</b> lots; other land uses are untouched.<br><b>Whole park</b>: counts the full lot (the usual way).<br><b>Part inside</b>: counts only the share of the park's area inside the shape.<br><b>Leave out edge parks</b>: drops parks that cross the boundary.<br><b>Leave out all parks</b>: drops every park lot.<br>Applies to radius, walkshed and drawn selections; NTAs, tracts, lots and blocks are always whole lots.</span>`:"");
+    (st.parkInfo?`<span class="parknote">Parks and other open-space lots can be huge. Under <b>Intersecting</b>, a park that only touches the circle or shape would count in full, so a ½ mi radius can pick up hundreds of acres of park that lie mostly outside it. Park rules change only <b>Open Space &amp; Outdoor Recreation</b> lots; other land uses are untouched.<br><b>Part inside</b>: counts only the share of the park's area inside the shape (the default).<br><b>Whole park</b>: counts the full lot.<br><b>Leave out edge parks</b>: drops parks that cross the boundary.<br><b>Leave out all parks</b>: drops every park lot.<br>Applies to radius, walkshed and drawn selections; NTAs, tracts, lots and blocks are always whole lots.</span>`:"");
 }
 function setPark(v){ const was=st.opts.park; if (v===was||!PARK_NAME[v]) return; st.opts.park=v; renderProfile(); writeHash();
   toast(`Park rules: ${PARK_NAME[v].toLowerCase()}.`,"Undo",()=>{ st.opts.park=was; renderProfile(); writeHash(); }); }
@@ -1241,7 +1347,7 @@ function renderProfile(){
   const boros=[...new Set(Array.from(idx,i=>Math.floor(P.bbl[i]/1e9)))].sort();
   const boroLine=boros.length>1||st.opts.boroExcl.size?`<p class="borol">${boros.length>1?`Spans ${boros.map(b=>BORO[b]).join(", ")}. Count only: ${boros.map(b=>`<button class="link" data-onlyboro="${b}">${BORO[b]}</button>`).join(" · ")}`:""}${st.opts.boroExcl.size?` ${[...st.opts.boroExcl].map(b=>BORO[b]).join(", ")} left out. <button class="link" data-onlyboro="all">Count every borough</button>`:""}</p>`:"";
   const dqLine=S.dqLots||st.opts.dq.mode!=="pluto"?`<p class="dqline">${fmt(S.dqLots)} lot${S.dqLots===1?"":"s"} here ${S.dqLots===1?"has":"have"} possible PLUTO data issues (${fmt(S.dqUnits)} units).<span class="dqfig">Figures: ${[["pluto","Count them"],["exclude","Leave them out"]].map(([k,t])=>`<button class="link${st.opts.dq.mode===k?" on":""}" data-dqmode="${k}">${t}</button>`).join(" · ")}${st.colorBy!=="dq"?` · <button class="link" data-dqview>Show on map</button>`:""}</span></p>`:"";
-  prof.innerHTML=`${filterChips()}${boroLine}${dqLine}${over?`<p class="warn spill">The lots counted cover ${fmt(S.acres,0)} acres, but the shape itself is ${fmt(shA,0)} acres: large lots (parks, rail yards, campuses) that only touch it count in full under <b>Intersecting</b>. <button class="link" data-clipto="center">Use Centroid within</button> or <button class="link" data-clipto="most">Majority within</button>${st.opts.park==="whole"?`, or count only the <button class="link" data-parkto="part">part of parks inside</button>`:""}.</p>`:""}${S.parkOut||S.parkCut?`<p class="dqline">Park rules: ${S.parkOut?`${fmt(S.parkOut)} park lot${S.parkOut===1?"":"s"} left out`:""}${S.parkOut&&S.parkCut?"; ":""}${S.parkCut?`${fmt(S.parkCut/43560,1)} acres of park outside the shape not counted`:""}. <button class="link" data-parkto="whole">Count whole parks</button></p>`:""}<div class="tiles">
+  prof.innerHTML=`${filterChips()}${boroLine}${dqLine}${over?`<p class="warn spill">The lots counted cover ${fmt(S.acres,0)} acres, but the shape itself is ${fmt(shA,0)} acres: large lots (${st.opts.park==="whole"?"parks, ":""}rail yards, campuses) that only touch it count in full under <b>Intersecting</b>. <button class="link" data-clipto="center">Use Centroid within</button> or <button class="link" data-clipto="most">Majority within</button>${st.opts.park==="whole"?`, or count only the <button class="link" data-parkto="part">part of parks inside</button>`:""}.</p>`:""}${S.parkOut||S.parkCut?`<p class="dqline">Park rules: ${S.parkOut?`${fmt(S.parkOut)} park lot${S.parkOut===1?"":"s"} left out`:""}${S.parkOut&&S.parkCut?"; ":""}${S.parkCut?`${fmt(S.parkCut/43560,1)} acres of park outside the shape not counted`:""}. <button class="link" data-parkto="whole">Count whole parks</button></p>`:""}<div class="tiles">
       <div><div class="v">${fmt(S.lots)}</div><div class="k">Tax lots</div></div>
       <div><div class="v">${fmt(S.acres,1)}</div><div class="k">Acres of lots</div></div>
       <div><div class="v">${fmt(S.units)}</div><div class="k">Housing units</div></div>
@@ -1666,6 +1772,9 @@ function initMap(style){
     map.addSource("ntas",{type:"geojson",data:areasGeoJSON(P,"nta")});
     add({id:"nta-fill",type:"fill",source:"ntas",paint:{"fill-color":"#1B62A5","fill-opacity":["case",["boolean",["feature-state","hover"],false],0.12,0]}});
     add({id:"nta-line",type:"line",source:"ntas",paint:{"line-color":"#14263B","line-width":["interpolate",["linear"],["zoom"],10,0.7,13,1.6],"line-opacity":0.8}});
+    map.addSource("geos",{type:"geojson",data:geosGeoJSON(P)});
+    add({id:"geo-fill",type:"fill",source:"geos",filter:["==",["get","k"],st.geoKind],layout:{visibility:"none"},paint:{"fill-color":"#1B62A5","fill-opacity":["case",["boolean",["feature-state","hover"],false],0.12,0]}});
+    add({id:"geo-line",type:"line",source:"geos",filter:["==",["get","k"],st.geoKind],layout:{visibility:"none"},paint:{"line-color":"#14263B","line-width":["interpolate",["linear"],["zoom"],10,1,13,2],"line-opacity":0.85}});
     map.addSource("bus-line",{type:"geojson",data:EMPTY,tolerance:0.4,attribution:"Bus: MTA"});
     add({id:"bus-line",type:"line",source:"bus-line",layout:{visibility:"none","line-cap":"round","line-join":"round"},paint:{"line-color":["get","c"],"line-opacity":0.75,"line-width":["interpolate",["linear"],["zoom"],10,0.7,14,1.6,17,3]}});
     add({id:"bus-name",type:"symbol",source:"bus-line",minzoom:13,layout:{visibility:"none","symbol-placement":"line","symbol-spacing":420,"text-field":["get","n"],"text-font":st.font,"text-size":10.5,"text-optional":true},paint:{"text-color":["get","c"],"text-halo-color":"#fff","text-halo-width":1.4}});
@@ -1980,7 +2089,7 @@ function plineSel(li, m, onlyNew){
   if (!onlyNew) return g; if (!st.T) return null;
   const reach=2*m+700, near=st.T.stations.filter(s=>L.stops.some(([x,y])=>((s.lng-x)*mlng(y))**2+((s.lat-y)*MLAT)**2<reach*reach));
   g.minus=near.map(s=>({type:"walk",sid:s.id,m,clip:st.clip})); g.name=`Newly served by ${L.name}: ${miles(m)}`; if (!g.minus.length) delete g.minus; return g; }
-const WALK_PRESETS=[[402.3,"¼ mi"],[804.7,"½ mi"],[1609.3,"1 mi"]];
+const WALK_PRESETS=[[402.336,"¼ mi"],[804.672,"½ mi"],[1609.344,"1 mi"]];
 function walkBox(o){
   const W=st.walk, from=o.ent?W.from:"pt", pre=WALK_PRESETS.some(([m])=>Math.abs(m-W.m)<1), seg=(k,items)=>`<div class="seg wseg" data-wset="${k}">${items}</div>`;
   const fromRow=o.fromRow===false?"":`<div class="wrow"><span class="wl">Measure from</span>${seg("from",`<button data-v="pt" class="${from==="pt"?"on":""}">Station center</button><button data-v="ent" class="${from==="ent"?"on":""}"${o.ent?"":` disabled title="No entrance data for this station"`}>Entrances</button>`)}</div>`;
@@ -2042,7 +2151,7 @@ const HINTS={
   radius:"Click the center, move out, then click again. Clicks snap to entrances and stations; with a fixed radius and Add on, click station after station. Radius:"};
 const TAP_TEXT={merge:"Taps merge into the current selection.",out:"Taps leave a lot out of the selection."};
 const touchUI=()=>matchMedia("(hover:none)").matches;
-function keysHint(m){ if (!["lot","block","area","tract","poly","radius"].includes(m)||touchUI()) return "";
+function keysHint(m){ if (!["lot","block","area","tract","geo","poly","radius"].includes(m)||touchUI()) return "";
   const k=[["Shift","add selection"],[MOD,"merge"],...(m==="poly"||m==="radius"?[]:[[ALT,"leave a lot out"]])];
   return `<span class="keys">${m==="poly"?"While finishing: ":""}${k.map(([a,b])=>`<kbd>${a}</kbd> ${b}`).join(" · ")}</span>`; }
 const meas={kind:"line",pts:[],done:false};
@@ -2066,10 +2175,11 @@ function drawMeas(cursor){ if (map.getSource("measure")) map.getSource("measure"
 function setMode(m){
   if (m==="measure"&&st.mode!=="measure"&&!meas.done){ meas.pts=[]; if (map&&map.getSource("measure")) map.getSource("measure").setData(EMPTY); }
   st.mode=m; drawPts=[]; radiusC=null; if (map.getSource("draw")) map.getSource("draw").setData(EMPTY);
-  $$("#tools button,#measBtn").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
+  $$("#tools button[data-mode],#measBtn").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
+  $("#geoBtn").textContent=m==="geo"?`${GEO_KINDS[st.geoKind][0]} ▾`:"More areas ▾"; applyGeo();
   const h=$("#hint"), kh=keysHint(m), th=st.tapMode&&m!=="view"&&m!=="measure"?`<span class="cliphint">${TAP_TEXT[st.tapMode]}</span>`:""; h.hidden=!HINTS[m]&&!kh&&!th;
   const tb=$("#tools"); h.style.top=matchMedia("(max-width:820px)").matches?(tb.offsetTop+tb.offsetHeight+6)+"px":"";
-  h.innerHTML=(HINTS[m]?`<span>${esc(HINTS[m])}</span>`+(m==="radius"?[["¼ mi",402.3],["½ mi",804.7],["1 mi",1609.3],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
+  h.innerHTML=(HINTS[m]?`<span>${esc(HINTS[m])}</span>`+(m==="radius"?[["¼ mi",402.336],["½ mi",804.672],["1 mi",1609.344],["Free",0]].map(([t,v])=>` <button data-r="${v}" class="${st.radiusPreset==v?"on":""}">${t}</button>`).join(""):"")
     +(m==="measure"?` <button data-mk="line" class="${meas.kind==="line"?"on":""}">Distance</button><button data-mk="area" class="${meas.kind==="area"?"on":""}">Area</button><button data-mdone>Done</button><button data-mclear>Clear</button> <b id="measOut">${measText()}</b>`:"")
     +(m==="radius"||m==="poly"?` <span class="cliphint">Lot inclusion: <b>${CLIP_NAME[st.clip]}</b> (change with ▾)</span>`:"")
     +(st.addTo!=null&&st.sels[st.addTo]?` <span class="cliphint">Adding to <b>${esc(groupName(st.sels[st.addTo].sel))}</b>. <button data-doneadd>Done</button></span>`:""):"")+kh+th;
@@ -2183,12 +2293,12 @@ function onMove(e){
     if (!f.length){ clearHover(); map.getCanvas().style.cursor=""; return bare(); }
     const i=f[0].id; setHover("lots",i); map.getCanvas().style.cursor="pointer";
     return tipAt(e.point,lotCard(i)+lt); }
-  const layer=st.mode==="tract"?"tract-fill":"nta-fill", src=st.mode==="tract"?"tracts":"ntas";
+  const layer=st.mode==="tract"?"tract-fill":st.mode==="geo"?"geo-fill":"nta-fill", src=st.mode==="tract"?"tracts":st.mode==="geo"?"geos":"ntas";
   if (!map.getLayer(layer)||map.getLayoutProperty(layer,"visibility")==="none") return bare();
   const f=map.queryRenderedFeatures(e.point,{layers:[layer]}), id=f.length?f[0].id:null;
   setHover(src,id);
   map.getCanvas().style.cursor=id!=null?"pointer":"";
-  if (id!=null) tipAt(e.point,`<div class="lc"><div class="lc-h"><b>${esc(f[0].properties.name)}</b><span>${src==="ntas"?"Neighborhood tabulation area":"2020 census tract"}</span></div></div>${lt}`); else bare();
+  if (id!=null) tipAt(e.point,`<div class="lc"><div class="lc-h"><b>${esc(f[0].properties.name)}</b><span>${KIND_NAME[st.P.areas[id]&&st.P.areas[id].kind]||""}</span></div></div>${lt}`); else bare();
 }
 
 function zoneTip(point){
@@ -2300,7 +2410,7 @@ function onClick(e){
     const f=map.queryRenderedFeatures(e.point,{layers:["blocks-fill"]}); if (!f.length) return;
     const key=st.P.blocks[f[0].id]&&st.P.blocks[f[0].id].key; if (key==null) return;
     return applyHow({type:"blocks",keys:[key]},how); }
-  const f=map.queryRenderedFeatures(e.point,{layers:[st.mode==="tract"?"tract-fill":"nta-fill"]});
+  const f=map.queryRenderedFeatures(e.point,{layers:[st.mode==="tract"?"tract-fill":st.mode==="geo"?"geo-fill":"nta-fill"]});
   if (f.length){ const a=st.P.areas[f[0].id]; applyHow({type:"area",kind:a.kind,code:a.code},how); }
 }
 function finishPoly(how){ if (drawPts.length<3){ setMode("view"); return; }
@@ -2309,6 +2419,13 @@ function finish(sel,how){ const stay=st.mode==="radius"&&(st.addMode||how==="new
   if (!stay && (st.mode==="radius"||st.mode==="poly")) setMode("view"); applyHow(sel,how); }
 
 function nextColor(){ const used=new Set(st.sels.map(e=>e.color)); return SEL_COLORS.find(c=>!used.has(c))||SEL_COLORS[st.sels.length%SEL_COLORS.length]; }
+function dropArea(key){
+  const hit=s=>s.type==="area"&&s.kind+":"+s.code===key, fix=s=>s.parts?{...s,parts:s.parts.filter(p=>!hit(p)).map(fix)}:s;
+  const next=st.sels.filter(x=>!hit(x.sel)).map(x=>({...x,sel:fix(x.sel)})).filter(x=>!x.sel.parts||x.sel.parts.length); if (!next.length) return;
+  const a=st.P.areas[st.P.areaIdx.get(key)]; pushUndo(); st.sels=next.map(x=>x.sel.type==="group"&&x.sel.parts.length===1?{...x,sel:x.sel.parts[0]}:x);
+  if (st.sels.length===1) st.view=0; else if (typeof st.view==="number"&&st.view>=st.sels.length) st.view="all";
+  drawSelection(); renderProfile(); writeHash(); toast(`Removed ${a?a.name:key} from the selection.`,"Undo",undo);
+}
 const curIndex=()=>st.sels.length===1?0:typeof st.view==="number"?st.view:st.sels.length-1;
 const needsT=sel=>sel&&(sel.type==="walk"||(sel.type==="group"&&(sel.parts.some(needsT)||(sel.minus||[]).some(needsT))));
 function select(sel, fit, o={}){
@@ -2409,14 +2526,15 @@ async function getZoningFile(rel){
 async function setCompare(id){ st.C=id?await getPack(id):null; renderTrack(); renderProfile(); writeHash(); }
 
 function writeHash(){
-  const q=new URLSearchParams(); q.set("v",st.P.id); if (st.peek!=null) q.set("lot",st.peek); if(st.C) q.set("c",st.C.id); if(st.colorBy!=="lu") q.set("m",st.colorBy); if(!st.map.fill) q.set("lay","zoning"); if (st.opts.park!=="whole") q.set("pk",st.opts.park);
+  const q=new URLSearchParams(); q.set("v",st.P.id); if (st.peek!=null) q.set("lot",st.peek); if(st.C) q.set("c",st.C.id); if(st.colorBy!=="lu") q.set("m",st.colorBy); if(!st.map.fill) q.set("lay","zoning"); if (st.opts.park!=="part") q.set("pk",st.opts.park);
   for (const L of st.lines) q.append("ln",encLine(L));
   for (const {sel:s} of st.sels) q.append("s", encSel(s));
   if (st.sels.length>1 && st.view!=="all") q.set("view",st.view);
   history.replaceState(null,"","#"+q.toString());
 }
-const encM=m=>String(+(+m).toFixed(1));
+const MI=1609.344, MI_PRE=[MI/4,MI/2,MI], exactM=m=>{ const p=MI_PRE.find(v=>Math.abs(v-m)<0.06); return p!=null?p:m; }, encM=m=>String(+(+m).toFixed(3));
 function encSel(s){
+  if (s.type==="multi") return "m:"+s.parts.map(encSel).join("~");
   if (s.type==="group") return "g:"+s.parts.map(encSel).join("~")+(s.minus||[]).map(x=>"~-"+encSel(x)).join("")+(s.name?"~="+s.name.replace(/[~&#]/g," "):"");
   return (s.type==="area"?`a:${s.kind}:${s.code}`: s.type==="lots"?"l:"+s.bbls.join(","): s.type==="blocks"?"k:"+s.keys.join(","):
     (s.type==="walk"?`w:${s.sid},${encM(s.m)}`: s.type==="radius"?`r:${s.c[0].toFixed(6)},${s.c[1].toFixed(6)},${encM(s.m)}`:"p:"+s.ring.slice(0,-1).map(p=>p.join(",")).join(";"))
@@ -2433,8 +2551,8 @@ function parseSel(s){
     if (t==="a"){ const [kind,code]=rest.split(":"); return {type:"area",kind,code}; }
     if (t==="l") return {type:"lots",bbls:rest.split(",").map(Number).filter(Boolean)};
     if (t==="k") return {type:"blocks",keys:rest.split(",").map(Number).filter(Boolean)};
-    if (t==="w"){ const [sid,m]=rest.split(","); return c({type:"walk",sid,m:+m}); }
-    if (t==="r"){ const [x,y,m]=rest.split(",").map(Number); return c({type:"radius",c:[x,y],m}); }
+    if (t==="w"){ const [sid,m]=rest.split(","); return c({type:"walk",sid,m:exactM(+m)}); }
+    if (t==="r"){ const [x,y,m]=rest.split(",").map(Number); return c({type:"radius",c:[x,y],m:exactM(m)}); }
     if (t==="p"){ const pts=rest.split(";").map(x=>x.split(",").map(Number)); if (pts.length>2) return c({type:"poly",ring:[...pts,pts[0]]}); }
   }catch(_){}
   return null;
@@ -2463,6 +2581,8 @@ function wirePanel(){
   panel.addEventListener("mouseleave",()=>$("#tip").hidden=true);
   panel.addEventListener("click",e=>{
     const sa=e.target.closest("#profile [data-showall]"); if (sa){ delete st.opts.hideCat[sa.dataset.showall]; return renderProfile(); }
+    const ffo=e.target.closest("#profile [data-ffomit],#profile [data-ffback]"); if (ffo){ const om=st.ffOmit||(st.ffOmit=new Set()); if (ffo.dataset.ffomit) ffo.dataset.ffomit.split("|").forEach(k=>om.add(k)); else om.delete(ffo.dataset.ffback); return renderProfile(); }
+    const fd=e.target.closest("#profile [data-ffdrop]"); if (fd) return dropArea(fd.dataset.ffdrop);
     const hc=e.target.closest("#profile [data-hidecat]"); if (hc && !e.target.closest("button")){ const k=hc.dataset.hidecat, n=hc.dataset.name, H=st.opts.hideCat[k]||(st.opts.hideCat[k]=new Set());
       H.has(n)?H.delete(n):H.add(n); if (!H.size) delete st.opts.hideCat[k]; $("#tip").hidden=true; return renderProfile(); }
     const cm=e.target.closest("#profile [data-cmpm]"); if (cm){ const [k,m]=cm.dataset.cmpm.split(":"); st.opts.cmpMetric[k]=m; return renderProfile(); }
@@ -2767,7 +2887,7 @@ function buildSearch(){
       if ((m2=/\s(\d{5})$/.exec(qa))) qa=qa.slice(0,m2.index).trim(); }
     const inBoro=i=>boroF==null||Math.floor(P().bbl[i]/1e9)===boroF;
     if (q.length>=3 && P().areas){ let na=0; P().areas.forEach(a=>{ if (na<4 && a.name && (a.name.toLowerCase().includes(q)||(a.kind==="tract"&&a.code===q))){ na++;
-      hits.push({tag:a.kind==="nta"?"NTA":"Tract",label:a.name,sub:a.kind==="nta"?"Neighborhood tabulation area":"2020 census tract",go:()=>{ setMode(a.kind==="nta"?"area":"tract"); select({type:"area",kind:a.kind,code:a.code},true,{map:true}); }}); } }); }
+      hits.push({tag:{nta:"NTA",tract:"Tract",cd:"CD",cdta:"CDTA",boro:"Borough"}[a.kind],label:a.name,sub:KIND_NAME[a.kind],go:()=>{ if (GEO_KINDS[a.kind]) st.geoKind=a.kind; setMode(a.kind==="nta"?"area":a.kind==="tract"?"tract":"geo"); select({type:"area",kind:a.kind,code:a.code},true,{map:true}); }}); } }); }
     if (q.length>=3 && !P().addrLower) hits.push({tag:"…",label:"Addresses are still loading",go:()=>{}});
     if (qa.length>=3 && P().addrLower){ const A=P().addrLower, N=P().addrNorm||(P().addrNorm=P().addr.map(a=>normAddr(a))), nq=normAddr(qa,true), starts=[], has=[];
       const bq=" "+nq;
@@ -2811,7 +2931,7 @@ function wireGuide(){
   if (!off && !navigator.webdriver) w.hidden=false;
 }
 function setTapMode(v){ st.tapMode=v||null; $("#tapMode").value=v||""; if (st.tapMode&&st.addMode) toggleAdd(); else setMode(st.mode); }
-function toggleAdd(){ st.addMode=!st.addMode; if (st.addMode&&st.tapMode) setTapMode(null); $("#addBtn").classList.toggle("on",st.addMode); $("#addBtn").setAttribute("aria-pressed",st.addMode);
+function toggleAdd(){ st.addMode=!st.addMode; if (st.addMode&&st.tapMode) setTapMode(null); $("#addBtn").classList.toggle("on",st.addMode); $("#addBtn").setAttribute("aria-pressed",st.addMode); $("#addBtn").textContent=st.addMode?"Adding":"＋ Add";
   setMode(st.mode); }
 
 async function boot(){
@@ -2827,7 +2947,13 @@ async function boot(){
     st.zoningFile=await getZoningFile(want); st.overlayFile=window.__LP__?null:await getOverlayFile();
     if (innerWidth<=820) $("#legend").open=false;
     initMap(await styleJob); renderTrack(); renderProfile(); wirePanel(); wireOptions(); buildSearch(); wireGuide();
-    $("#tools").onclick=e=>{ const b=e.target.closest("[data-mode]"); if(b) setMode(b.dataset.mode); };
+    $("#tools").onclick=e=>{ const b=e.target.closest("[data-mode]"); if (!b) return; if (b.id==="geoBtn") return openGeoMenu(e); setMode(b.dataset.mode); };
+    const gm=$("#geoMenu"), gb=$("#geoBtn");
+    function openGeoMenu(e){ e.stopPropagation(); if (!gm.hidden){ gm.hidden=true; gb.setAttribute("aria-expanded","false"); return; }
+      gm.innerHTML=`<div class="cmh">More areas<small>Click one on the map to select it</small></div>`+Object.entries(GEO_KINDS).map(([k,[,t]])=>`<button role="menuitemradio" aria-checked="${st.mode==="geo"&&k===st.geoKind}" data-g="${k}" class="${st.mode==="geo"&&k===st.geoKind?"on":""}"><b>${t}</b></button>`).join("");
+      const r=gb.getBoundingClientRect(), m=$("#mapbox").getBoundingClientRect(); gm.style.left=Math.max(8,r.left-m.left)+"px"; gm.style.top=(r.bottom-m.top+6)+"px"; gm.hidden=false; gb.setAttribute("aria-expanded","true"); }
+    gm.onclick=e=>{ e.stopPropagation(); const b=e.target.closest("[data-g]"); if (!b) return; st.geoKind=b.dataset.g; gm.hidden=true; gb.setAttribute("aria-expanded","false"); setMode("geo"); };
+    document.addEventListener("click",e=>{ if (!gm.hidden && !e.target.closest("#geoMenu,#geoBtn")){ gm.hidden=true; gb.setAttribute("aria-expanded","false"); } });
     $("#measBtn").onclick=()=>setMode(st.mode==="measure"?"view":"measure");
     $("#hint").onclick=e=>{ const b=e.target.closest("[data-r]"); if(!b) return; st.radiusPreset=+b.dataset.r; setMode("radius"); };
     $("#hint").addEventListener("click",e=>{ const k=e.target.closest("[data-mk]"); if (k){ meas.kind=k.dataset.mk; meas.pts=[]; meas.done=false; setMode("measure"); drawMeas(); return; }
@@ -2870,7 +2996,7 @@ async function boot(){
       const keep=(st.addMode||how==="new")?st.sels.map(x=>x.sel):[];
       restore(keep.concat([grp]),keep.length?keep.length:0,true,true); });
     document.addEventListener("input",e=>{ const t=e.target; if (!t.matches(".wcust input")) return; const box=t.closest(".wbox"), v=parseFloat(t.value);
-      if (!(v>=0.05&&v<=3)) return; const m=+(v*1609.344).toFixed(1); box.dataset.m=m; st.walk.m=m; t.parentNode.classList.add("on");
+      if (!(v>=0.05&&v<=3)) return; const m=+(v*1609.344).toFixed(3); box.dataset.m=m; st.walk.m=m; t.parentNode.classList.add("on");
       box.querySelectorAll('[data-wset="m"] button').forEach(b=>b.classList.remove("on")); });
     document.addEventListener("keydown",e=>{ if (e.key==="Enter"&&e.target.matches(".wcust input")){ e.preventDefault(); const b=e.target.closest(".wbox").querySelector(".wgo"); if (b) b.click(); } });
     $("#addBtn").onclick=()=>toggleAdd();

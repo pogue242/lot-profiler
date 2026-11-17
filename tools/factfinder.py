@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""factfinder.py — download DCP Population FactFinder ACS and 2020 Census profiles for every NTA and census tract into work/pff, compared with NYC"""
+"""factfinder.py — download DCP Population FactFinder ACS and 2020 Census profiles for every NTA, census tract, community district, CDTA and borough into work/pff, compared with NYC"""
 import argparse, gzip, json, os, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,7 +12,12 @@ KEEP = {"acs": ["sum", "marginOfError", "correlationCoefficient", "percent", "pe
 
 def areas(release):
     d = json.loads(gzip.decompress(open(os.path.join(ROOT, "data", release, "areas.json.gz"), "rb").read()))
-    return [("ntas", c) for c in sorted(d["nta"])] + [("tracts", c) for c in sorted(d["tract"])]
+    out = [("ntas", c) for c in sorted(d["nta"])] + [("tracts", c) for c in sorted(d["tract"])]
+    mp = os.path.join(ROOT, "data", release, "more_areas.json.gz")
+    if os.path.exists(mp):
+        G = {"cd": "districts", "cdta": "cdtas", "boro": "boroughs"}
+        out += [(G[e["kind"]], e["code"]) for e in json.loads(gzip.decompress(open(mp, "rb").read()))["entries"]]
+    return out
 
 def fetch(survey, geotype, geoid, out):
     path = os.path.join(out, survey, geotype, f"{geoid}.json.gz")

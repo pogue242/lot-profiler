@@ -37,7 +37,7 @@
   "dir": "26v2",
   "format": 3,
   "lots": 856687,
-  "bytes": 169498294,
+  "bytes": 169908708,
   "core": 7348037,
   "coverage": "New York City",
   "source": "NYC DCP MapPLUTO 26v2 (MapPLUTO_26v2_clipped), unmodified",
@@ -53,7 +53,7 @@
   "far": {
    "file": "far.lpk",
    "source": "Lot Profiler FAR engine 1.9.2 (ZR text read November 15, 2026; MapPLUTO 26v2; DCM 2025-10-31; zoning 2026-08)",
-   "built": "2026-11-15"
+   "built": "2026-11-16"
   }
  }
 ]
