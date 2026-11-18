@@ -331,7 +331,8 @@ button,select,input{font:inherit;color:inherit}
 .lc-h span{font-size:11px;color:var(--ink2);font-variant-numeric:tabular-nums}
 .lc-t{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px}
 .lc-t i{width:10px;height:10px;flex:none;border-radius:2px;border:1px solid rgba(0,0,0,.15)}
-.lc-t em{font-style:normal;margin-left:auto;font-size:11px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--band)}
+.lc-z{margin-left:auto;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
+.lc-t em{font-style:normal;white-space:nowrap;font-size:11px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--band)}
 .lc-g{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:8px 0 0;padding-top:8px;border-top:1px solid var(--hair)}
 .lc-g dt{font-size:10.5px;color:var(--ink2)}
 .lc-g dd{margin:0;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}

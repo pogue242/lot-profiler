@@ -276,6 +276,13 @@ async function loadAddr(P){
 }
 const GEO_KINDS={cd:["Districts","Community districts"],cdta:["CDTAs","Community district tabulation areas"],boro:["Boroughs","Boroughs"]};
 const KIND_NAME={nta:"Neighborhood tabulation area",tract:"2020 census tract",cd:"Community district",cdta:"Community district tabulation area",boro:"Borough"};
+async function loadZoneSplit(P){
+  let Z; try{ Z=JSON.parse(new TextDecoder().decode(await gunzip(await fetchBytes(P.dir+"zone_split.json.gz")))); }catch(_){ return; }
+  P.zsplit=new Map(Z.l.map(r=>{ const z=[]; for (let k=1;k<r.length;k+=2) z.push([Z.d[r[k]],r[k+1]<0?null:r[k+1]/10]); return [r[0],z]; }));
+}
+function zoneChips(P,i){ const z=P.zsplit&&P.zsplit.get(i), one=P.dict.zone[P.zone[i]];
+  if (!z) return one?`<span class="lc-z"><em>${esc(one)}</em></span>`:"";
+  return `<span class="lc-z" title="Zoning districts PLUTO lists for this lot, largest first">${z.map(([n])=>`<em>${esc(n)}</em>`).join("")}</span>`; }
 async function loadMore(P){
   let M; try{ M=JSON.parse(new TextDecoder().decode(await gunzip(await fetchBytes(P.dir+"more_areas.json.gz")))); }catch(_){ return; }
   const n=P.n, idx=(k,c)=>{ const v=P.areaIdx.get(k+":"+c); return v==null?65535:v; };
@@ -333,6 +340,7 @@ async function getPack(id){
       if (rel.far) await loadFar(P).catch(err=>{ console.warn("FAR table:",err); P.farError=err.message; });
       if (rel.qa) P.qaReady=loadQA(P).then(()=>{ P.dqKey=""; if (P===st.P){ if (st.colorBy==="dq"){ restyleLots(true); } renderProfile(); } }).catch(err=>console.warn("data issues:",err));
       P.addrReady=new Promise(r=>setTimeout(r,map?0:400)).then(()=>loadAddr(P)).then(()=>onAddr(P)).catch(err=>console.warn("addresses:",err));
+      P.zsplitReady=loadZoneSplit(P).catch(err=>console.warn("zoning splits:",err));
       P.areasReady=loadAreas(P).then(()=>onAreas(P)).catch(err=>console.warn("areas:",err));
       return P; })();
     st.packs.set(id,job); job.catch(()=>st.packs.delete(id)); }
@@ -1058,7 +1066,7 @@ function sortSpecs(specs){
 }
 const ABOUT={
   overview:"Totals for each selection side by side. Change is the newer value minus the older one.",
-  lu:"What each lot is used for, from PLUTO. Click a row to leave that use out.",
+  lu:"What each lot is used for, from PLUTO. Land area is each lot's lot area as PLUTO records it; streets aren't tax lots, so street area isn't included. Click a row to leave that use out.",
   ub:"Lots grouped by how many homes the building has. Lots with no homes are left out unless you add them back.",
   mix:"How much of each building is homes and how much is shops or offices, from PLUTO floor area.",
   fc:"Built FAR is floor area divided by lot area. Maximum FAR is the most zoning allows for the lot's use. FAR left is the gap between them. Parks, special districts and public facilities are not counted.",
@@ -2210,10 +2218,10 @@ function selMark(i){ if (!st.sels.length||st.peek!=null) return ""; const P=st.P
   for (const e of st.sels){ if (exclOf(e.sel).has(b)){ out=true; continue; } if (hasIdx(markIdx(P,e.sel),i)) hit.push(e.color); }
   if (hit.length) return `<span class="lc-in">${hit.map(c=>`<i style="background:${c}"></i>`).join("")}${st.sels.length>1&&hit.length>1?`In ${hit.length} selections`:"In selection"}</span>`;
   return out?`<span class="lc-in lc-out">Left out</span>`:""; }
-function lotCard(i){ const P=st.P, y=P.year[i], {boro,block,lot}=bblParts(P.bbl[i]), lu=P.lu[i], z=P.dict.zone[P.zone[i]];
+function lotCard(i){ const P=st.P, y=P.year[i], {boro,block,lot}=bblParts(P.bbl[i]), lu=P.lu[i];
   const maxTxt=P.far?fmt(P.mfar[i],2):"—";
   return `<div class="lc"><div class="lc-h"><b>${esc(addrOf(P,i)||(P.addr?"No address":"…"))}</b><span>${BORO[boro]||""} ${block}-${lot}${selMark(i)}</span></div>
-    <div class="lc-t"><i style="background:${LU_COLORS[lu]}"></i>${esc(P.dict.lu[lu])}${z?`<em>${esc(z)}</em>`:""}</div>
+    <div class="lc-t"><i style="background:${LU_COLORS[lu]}"></i>${esc(P.dict.lu[lu])}${zoneChips(P,i)}</div>
     <dl class="lc-g"><div><dt>Lot area</dt><dd>${fmt(P.area[i])} sq ft</dd></div><div><dt>Housing units</dt><dd>${fmt(P.units[i])}</dd></div>
       <div><dt>Year built</dt><dd>${y||"—"}</dd></div><div><dt>Built / max FAR</dt><dd>${fmt(P.bfar[i],2)} <span>/ ${maxTxt}</span></dd></div></dl>
     ${(()=>{ const q=dqIssues(P,i); return q.length?`<div class="lc-f lc-dq">Possible data issue: ${q.map(k=>DQ_NAMES[k].toLowerCase()).join("; ")}</div>`:""; })()}</div>`; }
@@ -2858,16 +2866,32 @@ function parseLookup(q){
   if (n.length===1 && boro==null && !kw) return null;
   return {boro, block:n[0], lot:n[1]};
 }
+const GEO_URL="https://geosearch.planninglabs.nyc/v2/autocomplete?text=", geoCache=new Map();
+const titleCase=s=>s.toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase());
+async function geoSearch(text){
+  const key=text.trim().toLowerCase().replace(/\s+/g," ");
+  if (!geoCache.has(key)){ const ac=new AbortController(), to=setTimeout(()=>ac.abort(),4000);
+    const job=fetch(GEO_URL+encodeURIComponent(key),{signal:ac.signal}).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }).finally(()=>clearTimeout(to));
+    geoCache.set(key,job); job.catch(()=>geoCache.delete(key)); }
+  const d=await geoCache.get(key), P=st.P, out=[], seen=new Set();
+  for (const f of d.features||[]){ const p=f.properties||{}, pad=p.addendum&&p.addendum.pad, bbl=pad&&+pad.bbl;
+    if (!bbl||seen.has(bbl)) continue; seen.add(bbl);
+    const [lng,lat]=f.geometry.coordinates, i=P.bblIdx.get(bbl), b=bblParts(bbl), place=p.neighbourhood||p.locality||p.borough||"";
+    out.push({tag:"Address",bbl,label:titleCase(p.name||p.label||""),sub:`${place&&place!==BORO[b.boro]?place+", ":""}${BORO[b.boro]} ${b.block}-${b.lot}${i==null?" · not a PLUTO lot":""}`,
+      go:()=>{ if (i!=null) return peekLot(bbl,true); map.flyTo({center:[lng,lat],zoom:Math.max(map.getZoom(),17),duration:600}); toast(`${titleCase(p.name||"")} is BBL ${bbl}, which isn't a lot in PLUTO ${P.id}.`); }});
+    if (out.length>=6) break; }
+  return out;
+}
 function buildSearch(){
-  const inp=$("#q"), res=$("#qres"); let hits=[], cur=-1, t=null;
+  const inp=$("#q"), res=$("#qres"); let hits=[], cur=-1, t=null, seq=0, pending=false, wantGo=false, typing=false;
   const draw=()=>{ inp.setAttribute("aria-expanded",String(hits.length>0)); if (cur>=0) inp.setAttribute("aria-activedescendant","qr-"+cur); else inp.removeAttribute("aria-activedescendant");
     res.innerHTML=hits.map((h,k)=>`<li role="option" id="qr-${k}" data-k="${k}" aria-selected="${k===cur}"><span><em>${h.tag}</em>${esc(h.label)}</span><small>${esc(h.sub||"")}</small></li>`).join(""); };
   const P=()=>st.P;
   const go=h=>{ res.innerHTML=""; inp.setAttribute("aria-expanded","false"); h.go(); if (h.tag!=="None"&&h.tag!=="…") setTimeout(()=>$("#areaName").focus({preventScroll:false}),60); };
   const lotHit=i=>({tag:"Lot",label:addrOf(P(),i)||"BBL "+Math.round(P().bbl[i]),sub:(()=>{const p=bblParts(P().bbl[i]);return `${BORO[p.boro]} ${p.block}-${p.lot}`;})(),
     go:()=>peekLot(Math.round(P().bbl[i]),true)});
-  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ const raw=inp.value.trim(), q=raw.toLowerCase().replace(/\s+/g," "); cur=-1; hits=[];
-    if (q.length<2){ return draw(); }
+  inp.oninput=()=>{ clearTimeout(t); typing=true; t=setTimeout(()=>{ typing=false; const raw=inp.value.trim(), q=raw.toLowerCase().replace(/\s+/g," "); cur=-1; hits=[];
+    if (q.length<2){ wantGo=false; return draw(); }
     const lk=parseLookup(raw);
     if (lk && lk.bbl){ const i=P().bblIdx.get(lk.bbl); if (i!=null) hits.push(lotHit(i)); }
     else if (lk){ const keys=[...P().blockIdx.keys()].filter(k=>k%1e5===lk.block&&(lk.boro==null||Math.floor(k/1e5)===lk.boro));
@@ -2888,6 +2912,7 @@ function buildSearch(){
     const inBoro=i=>boroF==null||Math.floor(P().bbl[i]/1e9)===boroF;
     if (q.length>=3 && P().areas){ let na=0; P().areas.forEach(a=>{ if (na<4 && a.name && (a.name.toLowerCase().includes(q)||(a.kind==="tract"&&a.code===q))){ na++;
       hits.push({tag:{nta:"NTA",tract:"Tract",cd:"CD",cdta:"CDTA",boro:"Borough"}[a.kind],label:a.name,sub:KIND_NAME[a.kind],go:()=>{ if (GEO_KINDS[a.kind]) st.geoKind=a.kind; setMode(a.kind==="nta"?"area":a.kind==="tract"?"tract":"geo"); select({type:"area",kind:a.kind,code:a.code},true,{map:true}); }}); } }); }
+    const base=hits; hits=[];
     if (q.length>=3 && !P().addrLower) hits.push({tag:"…",label:"Addresses are still loading",go:()=>{}});
     if (qa.length>=3 && P().addrLower){ const A=P().addrLower, N=P().addrNorm||(P().addrNorm=P().addr.map(a=>normAddr(a))), nq=normAddr(qa,true), starts=[], has=[];
       const bq=" "+nq;
@@ -2898,9 +2923,15 @@ function buildSearch(){
         for (let i=0;i<N.length;i++){ const n=N[i]; if (!n.endsWith(tail)||!inBoro(i)) continue; const h=parseInt(n,10); if (!(h>=0)||n.length!==String(h).length+tail.length) continue;
           near.push([Math.abs(h-num)+((h-num)%2?1e6:0),i]); }
         near.sort((x,y)=>x[0]-y[0]).slice(0,3).forEach(([,i])=>hits.push({...lotHit(i),tag:"Nearby"})); } }
-    if (!hits.length && q.length>=3 && P().addrLower) hits.push({tag:"None",label:"No address, BBL, block or station matches",sub:"PLUTO lists one address per lot; try the street without the number",go:()=>{}});
-    hits=hits.slice(0,12); draw(); },70); };
-  inp.onkeydown=e=>{ if(!hits.length) return;
+    const local=hits, addrFirst=/^\d/.test(qa), my=++seq;
+    const show=ad=>{ if (my!==seq) return; pending=false; const rest=ad.length?[]:local;
+      hits=addrFirst?[...ad,...base,...rest]:[...base,...ad,...rest];
+      if (!hits.length && q.length>=3 && P().addrLower) hits.push({tag:"None",label:"No address, BBL, block or station matches",sub:"Check the spelling, or try the street without the number",go:()=>{}});
+      hits=hits.slice(0,12); cur=-1; draw(); if (wantGo){ wantGo=false; if (hits[0]&&hits[0].tag!=="None") go(hits[0]); } };
+    if (lk || qa.length<3 || !/[a-z]/.test(qa)) return show([]);
+    hits=[...base]; pending=true; draw();
+    geoSearch(raw).then(show,()=>{ if (my!==seq) return; pending=false; hits=[...base,...local]; if (!hits.length && q.length>=3 && P().addrLower) hits.push({tag:"None",label:"No address, BBL, block or station matches",sub:"Address lookup is offline; PLUTO lists one address per lot",go:()=>{}}); hits=hits.slice(0,12); cur=-1; draw(); if (wantGo){ wantGo=false; if (hits[0]&&hits[0].tag!=="None") go(hits[0]); } }); },70); };
+  inp.onkeydown=e=>{ if (e.key==="Enter"&&(typing||pending)){ wantGo=true; e.preventDefault(); return; } if(!hits.length) return;
     if (e.key==="ArrowDown"){ cur=Math.min(hits.length-1,cur+1); draw(); e.preventDefault(); }
     else if (e.key==="ArrowUp"){ cur=Math.max(0,cur-1); draw(); e.preventDefault(); }
     else if (e.key==="Enter") go(hits[Math.max(0,cur)]);
